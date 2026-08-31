@@ -91,6 +91,14 @@ final class MainWindowController: NSWindowController {
         w.minSize = NSSize(width: 820, height: 520)
         w.center()
         super.init(window: w)
+        // Pencere kapandiginda Dock'tan ve ⌘Tab'den kalkmasi icin
+        // haber veriyoruz (bkz. AppDelegate.syncActivationPolicy).
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            DispatchQueue.main.async {
+                (NSApp.delegate as? AppDelegate)?.syncActivationPolicy()
+            }
+        }
         buildUI()
         observeConversationJump()
         select(.device)
@@ -215,6 +223,9 @@ final class MainWindowController: NSWindowController {
         // kutusuyla AYNI ic bosluklarda — kenara yapisik durmasin.
         settingsButton.setSymbol("gearshape")
         settingsButton.collapsed = true
+        // Vurgu zemini KUCUK: dugme tek basina dururken varsayilan olcu
+        // kocaman bir kare cikariyordu.
+        settingsButton.compactHighlight = true
         settingsButton.toolTip = L("Ayarlar", "Settings")
         settingsButton.setAccessibilityLabel(L("Ayarlar", "Settings"))
         settingsButton.target = self
@@ -398,6 +409,9 @@ final class MainWindowController: NSWindowController {
         // Dugmenin KENDI olculeri (40x32) kullaniliyor: daha kucuk bir
         // cerceve verince ic yerlesimi tasip ikon kayiyordu.
     }
+
+    /// Disaridan (menu cubugundan) ayarlari ac.
+    func openSettings() { showSettings() }
 
     /// Ayarlar: acilir panel olarak, dislinin uzerinden.
     @objc private func showSettings() {
@@ -620,6 +634,14 @@ final class ContentContainerView: NSView {
 /// Kategori dugmeleriyle AYNI ic bosluk ve hizaya sahip ikon dugmesi.
 /// Daraltma dugmesi bagimsiz ortalandigi icin simetrisiz duruyordu.
 final class IconRowButton: NSButton {
+    /// Vurgu zemini kucuk cizilsin.
+    ///
+    /// Bu dugme kenar cubugu satiri olarak da, tek basina bir simge
+    /// olarak da kullaniliyor. Tek basinayken satir genisligindeki
+    /// zemin kocaman duruyordu; burada zemin ikonun etrafina
+    /// cekiliyor.
+    var compactHighlight = false { didSet { needsDisplay = true } }
+
     var collapsed = false {
         didSet {
             row.edgeInsets = collapsed
@@ -682,10 +704,29 @@ final class IconRowButton: NSButton {
     /// Disaridan cagrilir (pencere odagi degisince).
     func clearHover() { hovering = false; refresh() }
     private func refresh() {
+        if compactHighlight {
+            // Zemini KATMANLA degil elle ciziyoruz: katman butun
+            // dugmeyi kapliyor ve tek simgede fazla buyuk duruyor.
+            layer?.backgroundColor = NSColor.clear.cgColor
+            needsDisplay = true
+            return
+        }
         layer?.cornerRadius = 9
         if #available(macOS 10.15, *) { layer?.cornerCurve = .continuous }
         layer?.backgroundColor = hovering
             ? NSColor.labelColor.withAlphaComponent(0.08).cgColor : NSColor.clear.cgColor
+    }
+
+    override func draw(_ dirty: NSRect) {
+        if compactHighlight, hovering {
+            // Simgenin etrafinda 22x22'lik yumusak bir kare.
+            let side: CGFloat = 22
+            let r = NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2,
+                           width: side, height: side)
+            NSColor.labelColor.withAlphaComponent(0.10).setFill()
+            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+        }
+        super.draw(dirty)
     }
 }
 

@@ -24,6 +24,8 @@ object Updates {
 
     sealed class Result {
         object UpToDate : Result()
+        /// Depoda henuz yayimlanmis surum yok.
+        object NoReleases : Result()
         data class Available(val version: String, val url: String, val notes: String) : Result()
         data class Failed(val reason: String) : Result()
     }
@@ -37,6 +39,9 @@ object Updates {
                     connectTimeout = 8000
                     readTimeout = 8000
                 }
+                // 404 = depoda HENUZ yayimlanmis surum yok. Bu bir hata
+                // degil; kullaniciya "kontrol edilemedi" demek yaniltici.
+                if (c.responseCode == 404) { done(Result.NoReleases); return@thread }
                 if (c.responseCode != 200) {
                     done(Result.Failed("HTTP ${c.responseCode}")); return@thread
                 }

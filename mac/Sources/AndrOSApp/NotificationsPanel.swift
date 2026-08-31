@@ -401,13 +401,44 @@ final class NotificationsPanel: NSViewController, AndrOSPanel,
     }
 
     @objc private func runAction(_ s: NSButton) {
-        guard let parts = s.identifier?.rawValue.split(separator: "|"), parts.count == 2,
-              let idx = Int(parts[1]), let d = data else { return }
-        let key = String(parts[0])
+        guard let p = parse(s.identifier?.rawValue), let d = data else { return }
+        Notify.shared.markActed(p.key)
         DispatchQueue.global().async { [weak self] in
-            d.runNotificationAction(key, index: idx)
-            DispatchQueue.main.async { self?.load() }
+            let ok = d.runNotificationAction(p.key, index: p.index)
+            DispatchQueue.main.async {
+                if !ok {
+                    self?.showToast(L("Eylem çalıştırılamadı — bildirim telefonda kapanmış olabilir.",
+                                      "Could not run the action — it may be gone on the phone."))
+                }
+                self?.load()
+            }
         }
+    }
+
+    /// Kisa bilgi satiri (acilir pencere degil).
+    private func showToast(_ text: String) {
+        let l = NSTextField(labelWithString: text)
+        l.font = .systemFont(ofSize: 11)
+        l.textColor = .systemOrange
+        l.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(l)
+        NSLayoutConstraint.activate([
+            l.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            l.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+        ])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { l.removeFromSuperview() }
+    }
+
+    /// Dugme kimliginden (anahtar, eylem sirasi) cikarir.
+    ///
+    /// ANAHTARIN ICINDE "|" VAR: Android bildirim anahtarlari
+    /// "0|com.whatsapp|1|null|10123" bicimde. Bastan bolunce parca
+    /// sayisi ikiyi asiyor ve dugmeler SESSIZCE hicbir sey yapmiyordu.
+    /// Son ayiricidan boluyoruz.
+    private func parse(_ id: String?) -> (key: String, index: Int)? {
+        guard let id, let cut = id.lastIndex(of: "|") else { return nil }
+        guard let idx = Int(id[id.index(after: cut)...]) else { return nil }
+        return (String(id[id.startIndex..<cut]), idx)
     }
 
     /// Kucuk ikon dugmesi (okundu, sustur, vazgec).
@@ -427,9 +458,8 @@ final class NotificationsPanel: NSViewController, AndrOSPanel,
 
     /// Yanit kutusunu SATIR ICINDE acar — acilir pencere yok.
     @objc private func beginReply(_ s: NSButton) {
-        guard let parts = s.identifier?.rawValue.split(separator: "|"), parts.count == 2
-        else { return }
-        replyingKey = String(parts[0])
+        guard let p = parse(s.identifier?.rawValue) else { return }
+        replyingKey = p.key
         table.reloadData()
     }
 
@@ -439,9 +469,8 @@ final class NotificationsPanel: NSViewController, AndrOSPanel,
     }
 
     @objc private func sendReply(_ s: NSControl) {
-        guard let parts = s.identifier?.rawValue.split(separator: "|"), parts.count == 2,
-              let idx = Int(parts[1]), let d = data else { return }
-        let key = String(parts[0])
+        guard let p = parse(s.identifier?.rawValue), let d = data else { return }
+        let key = p.key, idx = p.index
         // Metin ya kutunun kendisinden ya da yanindaki dugmeden geliyor.
         let text: String
         if let f = s as? NSTextField { text = f.stringValue }

@@ -79,10 +79,15 @@ class MediaModule(private val ctx: Context) {
 
     fun tracks(id: Int, limit: Int): JSONObject {
         val out = JSONArray()
+        // MUTLAK yol (DATA) SART: Mac dosyayi indirirken bu yolu
+        // kullaniyor. Yalnizca DISPLAY_NAME gonderilince telefon
+        // "Bu dosya disarida" diyip reddediyordu (olculdu) — galeride
+        // duzeltilen ayni hata burada kalmis.
         val proj = arrayOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE,
                            MediaStore.Audio.Media.ARTIST, MediaStore.Audio.Media.ALBUM,
                            MediaStore.Audio.Media.ALBUM_ID, MediaStore.Audio.Media.DURATION,
-                           MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DISPLAY_NAME)
+                           MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DISPLAY_NAME,
+                           MediaStore.Audio.Media.DATA)
         ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, proj,
             "${MediaStore.Audio.Media.IS_MUSIC}!=0", null,
             // NOT: "COLLATE LOCALIZED" KULLANILMIYOR. Android 11'den
@@ -102,7 +107,8 @@ class MediaModule(private val ctx: Context) {
                     .put("albumId", c.getLong(4))
                     .put("duration", c.getLong(5))
                     .put("size", c.getLong(6))
-                    .put("name", c.getString(7) ?: ""))
+                    .put("name", c.getString(7) ?: "")
+                    .put("path", c.getString(8) ?: ""))
                 n++
             }
         }

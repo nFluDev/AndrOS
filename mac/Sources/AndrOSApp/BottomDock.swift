@@ -51,6 +51,9 @@ final class BottomDock: NSView {
 
         // --- Aktarimlar
         transfersBox.orientation = .vertical
+        // Satirlar TAM GENISLIK kaplasin: `.leading` ile her satir
+        // yalnizca icerigi kadar genisliyordu, kisa adli aktarimlar
+        // yarim kutu gibi duruyordu.
         transfersBox.alignment = .leading
         transfersBox.spacing = 4
         transfersBox.translatesAutoresizingMaskIntoConstraints = false
@@ -275,16 +278,26 @@ final class BottomDock: NSView {
                 .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
             b.target = self; b.action = #selector(showHistory)
             row.addArrangedSubview(b)
+            row.translatesAutoresizingMaskIntoConstraints = false
             transfersBox.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: transfersBox.widthAnchor).isActive = true
             return
         }
 
-        for it in live.prefix(2) { transfersBox.addArrangedSubview(row(for: it)) }
+        // Genislik kisiti EKLEDIKTEN SONRA: once etkinlestirmek "ortak
+        // ust gorunum yok" istisnasi atip uygulamayi dusuruyordu.
+        for it in live.prefix(2) {
+            let r = row(for: it)
+            transfersBox.addArrangedSubview(r)
+            r.widthAnchor.constraint(equalTo: transfersBox.widthAnchor).isActive = true
+        }
         if !queued.isEmpty {
             let more = NSTextField(labelWithString: L("+\(queued.count) sırada", "+\(queued.count) queued"))
             more.font = .systemFont(ofSize: 9)
             more.textColor = .tertiaryLabelColor
+            more.translatesAutoresizingMaskIntoConstraints = false
             transfersBox.addArrangedSubview(more)
+            more.widthAnchor.constraint(equalTo: transfersBox.widthAnchor).isActive = true
         }
         // SON ISLEM her zaman gorunur — devam eden olmasa bile.
         if live.isEmpty, queued.isEmpty, let last = finished.last {
@@ -313,7 +326,9 @@ final class BottomDock: NSView {
                 .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
             b.contentTintColor = .tertiaryLabelColor
             b.target = self; b.action = #selector(showHistory)
+            b.translatesAutoresizingMaskIntoConstraints = false
             transfersBox.addArrangedSubview(b)
+            b.widthAnchor.constraint(equalTo: transfersBox.widthAnchor).isActive = true
         }
     }
 
@@ -472,6 +487,10 @@ final class BottomDock: NSView {
         stop.target = self
         stop.action = #selector(cancelItem(_:))
         stop.identifier = NSUserInterfaceItemIdentifier(it.id.uuidString)
+
+        // Ad esner, dugmeler saga yaslanir.
+        name.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        name.setContentHuggingPriority(.init(1), for: .horizontal)
 
         let top = NSStackView(views: [arrow, name, pause, stop])
         top.orientation = .horizontal

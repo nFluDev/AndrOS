@@ -7,7 +7,7 @@ import Foundation
 /// paneli yeniden yazmak yerine burada bekletiyoruz — cagrilar zaten
 /// ana is parcacigi disinda oldugu icin arayuz donmuyor.
 public final class CompanionBridge {
-    private let link: CompanionLink
+    let link: CompanionLink
     public init(_ link: CompanionLink) { self.link = link }
 
     public var isReady: Bool { link.state == .ready }
@@ -150,13 +150,22 @@ public extension AndroidData {
         guard let b = companion, b.isReady else { return tracks() }
         let rows = b.array("music.tracks", "tracks", ["limit": limit])
         guard !rows.isEmpty else { return tracks() }
+        // Yol MUTLAK mi? Degilse indirme telefonda reddediliyor.
+        if let first = rows.first?["path"] as? String {
+            Log.write("muzik yolu örneği: \(first)")
+        } else {
+            Log.write("muzik: telefon YOL göndermiyor (eski sürüm?)")
+        }
         return rows.compactMap { r in
             guard let title = r["title"] as? String else { return nil }
             return Track(title: title,
                          artist: r["artist"] as? String ?? "",
                          album: r["album"] as? String ?? "",
                          albumID: "\(r["albumId"] as? Int ?? 0)",
-                         path: r["name"] as? String ?? title,
+                         // MUTLAK yol; telefon vermiyorsa (eski surum)
+                         // ada duseriz ama indirme calismaz.
+                         path: (r["path"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                               ?? (r["name"] as? String ?? title),
                          name: r["name"] as? String ?? title,
                          duration: r["duration"] as? Int ?? 0,
                          size: r["size"] as? Int ?? 0)
@@ -198,6 +207,28 @@ public extension AndroidData {
         if let b = companion, b.isReady,
            b.call("files.move", ["from": from, "to": to]) != nil { return true }
         return (try? adb.run(["shell", "mv", "\"\(from)\"", "\"\(to)\""]))?.code == 0
+    }
+
+    /// Dosyayi indir — eslesmisse UYGULAMA ile, yoksa adb ile.
+    ///
+    /// Uygulama yolu SIRALI: blok alicisi tek, es zamanli indirme
+    /// verileri karistirir. Sirayi burada tutuyoruz.
+    private static let pullGate = DispatchQueue(label: "dev.naer.andros.pull")
+
+    func pullPreferringApp(_ remote: String, to local: String,
+                           progress: ((Int, Int) -> Void)? = nil) -> Bool {
+        guard let b = companion, b.isReady else { return pull(remote, to: local) }
+        return Self.pullGate.sync {
+            let sem = DispatchSemaphore(value: 0)
+            var ok = false
+            b.link.downloadFile(path: remote, to: local, progress: progress) { r in
+                ok = r; sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 600)
+            // Uygulama yolu basarisizsa adb'yi DENE: bazi dosyalar
+            // paylasilan depolamanin disinda kalabiliyor.
+            return ok ? true : pull(remote, to: local)
+        }
     }
 
     /// Galeri ogeleri.

@@ -119,6 +119,8 @@ class SettingsActivity : Activity() {
                     when (result) {
                         is Updates.Result.UpToDate ->
                             toast("En güncel sürümdesin.")
+                        is Updates.Result.NoReleases ->
+                            toast("Henüz yayımlanmış sürüm yok.")
                         is Updates.Result.Available ->
                             promptUpdate(result.version, result.url, result.notes)
                         is Updates.Result.Failed ->

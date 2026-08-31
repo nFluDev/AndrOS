@@ -10,6 +10,8 @@ enum Updates {
 
     enum Result {
         case upToDate
+        /// Depoda henuz yayimlanmis surum yok — hata degil.
+        case noReleases
         case available(version: String, url: String, notes: String)
         case failed(String)
     }
@@ -25,6 +27,7 @@ enum Updates {
         URLSession.shared.dataTask(with: req) { data, resp, err in
             func finish(_ r: Result) { DispatchQueue.main.async { done(r) } }
             if let err { finish(.failed(err.localizedDescription)); return }
+            if (resp as? HTTPURLResponse)?.statusCode == 404 { finish(.noReleases); return }
             guard let http = resp as? HTTPURLResponse, http.statusCode == 200, let data else {
                 finish(.failed("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")); return
             }

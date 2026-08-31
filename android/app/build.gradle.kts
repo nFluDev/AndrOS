@@ -1,6 +1,23 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// Yayin imzasi DEPODA DEGIL.
+//
+// Anahtar deposu ve parolalari uygulamanin destek klasorunde duruyor
+// (`~/Library/Application Support/AndrOS/release-signing.properties`).
+// Acik kaynak bir depoda imza anahtari bulunamaz; ayrica anahtari
+// kaybetmek "bir daha guncelleme yayinlayamazsin" demek.
+//
+// Dosya yoksa hata VERMIYORUZ: depoyu klonlayan herkes hata ayiklama
+// imzasiyla derleyebilsin.
+val signingProps = Properties().apply {
+    val f = File(System.getProperty("user.home"),
+                 "Library/Application Support/AndrOS/release-signing.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -12,13 +29,25 @@ android {
         minSdk = 26            // Android 8.0 — kullanicinin telefonu Android 11
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.0-beta.1"
+    }
+
+    signingConfigs {
+        if (signingProps.containsKey("storeFile")) {
+            create("release") {
+                storeFile = File(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

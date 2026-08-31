@@ -65,6 +65,12 @@ final class SettingsPanel: NSViewController {
                    key: "mbCamera", default: true) { _ in
                 NotificationCenter.default.post(name: .androsSettingsChanged, object: nil)
             },
+            toggle(L("Menü çubuğu animasyonları", "Menu bar animation"),
+                   L("Uzun parça adları kayarak görünür. Kapalıyken kırpılır.",
+                     "Long track names scroll. When off they are truncated."),
+                   key: "mbAnimate", default: true) { _ in
+                NotificationCenter.default.post(name: .androsSettingsChanged, object: nil)
+            },
             toggle(L("Telefon etkinlikleri", "Phone activities"),
                    L("Kurye, geri sayım, indirme gibi süren işler menü çubuğunda.",
                      "Ongoing things — delivery, countdown, downloads — in the menu bar."),
@@ -202,6 +208,9 @@ final class SettingsPanel: NSViewController {
             case .upToDate:
                 self.statusLine.stringValue = L("En güncel sürümdesin.",
                                                 "You are up to date.")
+            case .noReleases:
+                self.statusLine.stringValue = L("Henüz yayımlanmış sürüm yok.",
+                                                "No published releases yet.")
             case .available(let v, let url, let notes):
                 self.statusLine.stringValue = L("Yeni sürüm: \(v)", "New version: \(v)")
                 let a = NSAlert()

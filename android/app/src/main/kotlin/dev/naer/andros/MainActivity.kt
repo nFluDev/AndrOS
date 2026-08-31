@@ -114,6 +114,7 @@ class MainActivity : AppCompatActivity() {
             AndrOSService.restartFromForeground(this)
         }
         requestCorePermissions()
+        maybeCheckForUpdate()
         handlePairUri(intent?.data)
     }
 
@@ -163,6 +164,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     // MARK: - Durum
+
+    /// Gunde BIR kez sessiz guncelleme denetimi.
+    ///
+    /// SESSIZ KURULUM YOK: Android buna izin vermiyor ve vermemeli de.
+    /// Yeni surum varsa haber veriyoruz, indirmeyi ve kurulumu
+    /// kullanici onayliyor.
+    private fun maybeCheckForUpdate() {
+        val p = SettingsActivity.prefs(this)
+        if (!p.getBoolean(SettingsActivity.KEY_AUTO_UPDATE, true)) return
+        val last = p.getLong("lastUpdateCheck", 0L)
+        val now = System.currentTimeMillis()
+        if (now - last < 24 * 60 * 60 * 1000L) return
+        p.edit().putLong("lastUpdateCheck", now).apply()
+        Updates.check(this) { r ->
+            if (r !is Updates.Result.Available) return@check
+            runOnUiThread {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("Yeni sürüm: ${r.version}")
+                    .setMessage(r.notes.ifBlank { "Değişiklik notu yok." })
+                    .setPositiveButton("İndir") { _, _ ->
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url)))
+                    }
+                    .setNegativeButton("Şimdi değil", null)
+                    .show()
+            }
+        }
+    }
 
     private fun refresh() {
         val on = AndrOSService.running

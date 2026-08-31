@@ -41,6 +41,8 @@ final class DevicePanel: NSViewController, AndrOSPanel,
     private let detailSub = NSTextField(labelWithString: "")
     private var timer: Timer?
     private var wirelessButton: NSButton?
+    private let advancedToggle = NSButton()
+    private var advancedOpen = false
     private let audioToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let cameraToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let pairButton = NSButton()
@@ -166,12 +168,6 @@ final class DevicePanel: NSViewController, AndrOSPanel,
 
         let refresh = textButton(L("Yenile", "Refresh"), #selector(reload))
         let screenshot = textButton(L("Ekran görüntüsü al", "Take Screenshot"), #selector(screenshot))
-        let wireless = textButton(L("Kablosuz bağlan", "Switch to Wi-Fi"), #selector(enableWireless))
-        wireless.toolTip = L("Cihazı kablosuz hata ayıklamaya alır ve Wi-Fi üzerinden bağlanır. "
-                           + "Bunun için cihazın şu an USB ile bağlı olması gerekir.",
-                             "Switches the device to wireless debugging and connects over Wi-Fi. "
-                           + "The device must be attached over USB right now.")
-        wirelessButton = wireless
         let reboot = textButton(L("Yeniden başlat", "Restart"), #selector(reboot))
 
         // Eslestir dugmesi ARAC CUBUGUNDA da var: sag sutundaki serit
@@ -208,7 +204,10 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         // Efektler MENU CUBUGUNDA (kamera acikken oraya bakiliyor).
         // SES ve KAMERA anahtarlari MENU CUBUGUNDA (StatusPanel):
         // burada bulunmasi zordu ve dar pencerede sigmiyordu.
-        let actions = NSStackView(views: [refresh, screenshot, wireless, reboot,
+        // "Kablosuz baglan" KALDIRILDI: uygulama zaten kendi TLS
+        // baglantisiyla Wi-Fi uzerinden calisiyor; adb'yi tcpip kipine
+        // almanin bir faydasi kalmadi.
+        let actions = NSStackView(views: [refresh, screenshot, reboot,
                                           pairButton, NSView(), spinner])
         actions.orientation = .horizontal
         actions.spacing = 8
@@ -607,37 +606,96 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         buildPairPane()
     }
 
+    /// "+" ile acilan ekran: CIHAZ EKLEMENIN ilk adimi.
+    ///
+    /// Eskiden burada adb kablosuz eslestirme kodu alanlari vardi.
+    /// Artik eslestirme mobil uygulamayla yapiliyor ve kod gerekmiyor;
+    /// yeni bir telefon eklemenin gercek ilk adimi UYGULAMAYI KURMAK.
+    /// Bu yuzden karekod dogrudan burada — ayri bir pencere acmak
+    /// gereksiz bir adim.
+    ///
+    /// Eski adb yolu kayboldu degil, "Gelismis" altina alindi:
+    /// uygulamayi kuramayan biri icin hala bir cikis yolu.
     private func buildPairPane() {
         grid.arrangedSubviews.forEach { $0.removeFromSuperview() }
         detailTitle.stringValue = L("Cihaz ekle", "Add a device")
-        detailSub.stringValue = L("Kablosuz ya da kabloyla — ikisi de AndrOS mobil uygulaması üzerinden.",
-                                  "Wireless or wired — both go through the AndrOS mobile app.")
+        detailSub.stringValue = L("Telefona AndrOS'u kur; gerisi kendiliğinden.",
+                                  "Install AndrOS on the phone; the rest is automatic.")
 
-        // 1) Asil yol: mobil uygulama. Hedef, USB/kablosuz HATA AYIKLAMA
-        //    gerektirmeden baglanmak; eslestirme uygulamanin kendisiyle
-        //    yapiliyor, telefonda gelistirici secenekleri acmak gerekmiyor.
-        let primary = pairCard(
-            symbol: "iphone.radiowaves.left.and.right",
-            title: L("AndrOS mobil uygulaması ile eşleştir",
-                     "Pair with the AndrOS mobile app"),
-            body: L("Telefona AndrOS uygulamasını kur ve aç; aynı ağdaki bu Mac "
-                  + "listede görünür, tek dokunuşla eşleşir. Kabloyla bağlarsan da "
-                  + "aynı uygulama üzerinden çalışır.\n\n"
-                  + "Hata ayıklama seçeneklerini açman GEREKMEZ.",
-                    "Install and open AndrOS on the phone; this Mac shows up on the "
-                  + "same network and pairs with one tap. Over a cable it works "
-                  + "through the same app.\n\n"
-                  + "You do NOT need to turn on any debugging options."),
-            badge: L("Mobil uygulama ile gelecek", "Arrives with the mobile app"))
-        grid.addArrangedSubview(primary)
-        primary.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+        // --- 1) Karekod karti
+        let qr = NSImageView()
+        qr.image = InstallSheet.makeQR(InstallSheet.url)
+        qr.wantsLayer = true
+        qr.layer?.backgroundColor = NSColor.white.cgColor
+        qr.layer?.cornerRadius = 10
+        qr.translatesAutoresizingMaskIntoConstraints = false
+        qr.widthAnchor.constraint(equalToConstant: 168).isActive = true
+        qr.heightAnchor.constraint(equalToConstant: 168).isActive = true
 
-        // 2) Gecici yol: uygulama cikana kadar adb kablosuz.
-        let head2 = NSTextField(labelWithString:
-            L("Şimdilik: adb ile kablosuz", "For now: wireless over adb"))
-        head2.font = .systemFont(ofSize: 11, weight: .semibold)
-        head2.textColor = .secondaryLabelColor
-        grid.addArrangedSubview(head2)
+        let qrTitle = NSTextField(labelWithString: L("Telefona kur", "Install on phone"))
+        qrTitle.font = .systemFont(ofSize: 14, weight: .semibold)
+
+        let qrNote = NSTextField(wrappingLabelWithString: L(
+            "Karekodu telefonunun kamerasıyla okut; kurulum sayfası açılır. "
+          + "Uygulamayı kurup açtığında bu Mac telefonda listede görünür — "
+          + "tek dokunuşla eşleşir. Hata ayıklama seçeneklerine gerek yok.",
+            "Scan the QR with your phone's camera; the install page opens. "
+          + "Once you install and open the app, this Mac appears in its list — "
+          + "one tap pairs them. No developer options needed."))
+        qrNote.font = .systemFont(ofSize: 11)
+        qrNote.textColor = .secondaryLabelColor
+        qrNote.preferredMaxLayoutWidth = 250
+
+        let link = NSButton(title: InstallSheet.url
+                                .replacingOccurrences(of: "https://", with: ""),
+                            target: InstallActions.shared,
+                            action: #selector(InstallActions.openLink))
+        link.bezelStyle = .inline
+        link.isBordered = false
+        link.contentTintColor = .controlAccentColor
+        link.font = .systemFont(ofSize: 11)
+
+        let copy = NSButton(title: L("Bağlantıyı kopyala", "Copy link"),
+                            target: InstallActions.shared,
+                            action: #selector(InstallActions.copyLink))
+        copy.bezelStyle = .rounded
+
+        let texts = NSStackView(views: [qrTitle, qrNote, link, copy])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 8
+
+        let card = NSStackView(views: [qr, texts])
+        card.orientation = .horizontal
+        card.alignment = .top
+        card.spacing = 16
+        card.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        grid.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
+
+        // --- 2) Gelismis: adb kablosuz (uygulama kurulamiyorsa)
+        advancedToggle.title = L("Gelişmiş: adb ile kablosuz bağlan",
+                                 "Advanced: connect wirelessly over adb")
+        advancedToggle.setButtonType(.onOff)
+        advancedToggle.bezelStyle = .inline
+        advancedToggle.isBordered = false
+        advancedToggle.font = .systemFont(ofSize: 11)
+        advancedToggle.contentTintColor = .secondaryLabelColor
+        advancedToggle.target = self
+        advancedToggle.action = #selector(toggleAdvanced)
+        advancedToggle.state = advancedOpen ? .on : .off
+        grid.addArrangedSubview(advancedToggle)
+
+        guard advancedOpen else {
+            let cancel = NSButton(title: L("Vazgeç", "Cancel"), target: self,
+                                  action: #selector(cancelPair))
+            cancel.bezelStyle = .rounded
+            grid.addArrangedSubview(cancel)
+            return
+        }
 
         for (f, ph) in [(pairAddress, L("Bağlantı adresi — 192.168.1.42:5555",
                                         "Connect address — 192.168.1.42:5555")),
@@ -664,16 +722,21 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         grid.addArrangedSubview(row)
 
         let note = NSTextField(wrappingLabelWithString: L(
-            "Telefonda Geliştirici Seçenekleri › Kablosuz hata ayıklama açık olmalı. "
-          + "Eşleştirme adresinin portu bağlantı portundan FARKLIDIR. Android 11 "
-          + "öncesinde yalnız adres yeterli, kod alanını boş bırak.",
-            "Developer options › Wireless debugging must be on. The pairing port is "
-          + "DIFFERENT from the connection port. Before Android 11 the address alone "
-          + "is enough — leave the code empty."))
+            "Bu yol yalnızca AndrOS uygulamasını kuramadığın durumlar için. "
+          + "Telefonda Geliştirici Seçenekleri › Kablosuz hata ayıklama açık olmalı; "
+          + "eşleştirme portu bağlantı portundan FARKLIDIR.",
+            "This path is only for when you cannot install the AndrOS app. "
+          + "Developer options › Wireless debugging must be on; the pairing port is "
+          + "DIFFERENT from the connection port."))
         note.font = .systemFont(ofSize: 10)
         note.textColor = .tertiaryLabelColor
         note.preferredMaxLayoutWidth = 460
         grid.addArrangedSubview(note)
+    }
+
+    @objc private func toggleAdvanced() {
+        advancedOpen.toggle()
+        buildPairPane()
     }
 
     private func pairCard(symbol: String, title: String, body: String,

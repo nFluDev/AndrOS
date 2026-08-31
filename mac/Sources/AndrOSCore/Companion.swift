@@ -398,6 +398,64 @@ public final class CompanionLink {
         return id
     }
 
+    /// Bir dosyayi telefondan indirir — adb OLMADAN.
+    ///
+    /// `files.read` once JSON basligi (boyut, ad) sonra 256 KB'lik
+    /// ikili bloklar yolluyor; bos blok "bitti" demek. Blok alicisi
+    /// TEK oldugu icin bu cagri es zamanli calisamaz; ust katman
+    /// (`AndroidData.pullPreferringApp`) sirayi kendisi tutuyor.
+    ///
+    /// Neden gerekli: hedef adb'siz calismak. USB cikinca ve hata
+    /// ayiklama kapaninca `adb pull` calismiyor, muzik/dosya indirme
+    /// tamamen duruyordu (olculdu: kuyruga giriyor, hicbiri inmiyor).
+    public func downloadFile(path: String, to local: String,
+                             progress: ((Int, Int) -> Void)? = nil,
+                             done: @escaping (Bool) -> Void) {
+        guard state == .ready else { done(false); return }
+        FileManager.default.createFile(atPath: local, contents: nil)
+        guard let handle = FileHandle(forWritingAtPath: local) else { done(false); return }
+
+        var expected = 0
+        var received = 0
+        var finished = false
+        func finish(_ ok: Bool) {
+            guard !finished else { return }
+            finished = true
+            blobSink = nil
+            try? handle.close()
+            if !ok { try? FileManager.default.removeItem(atPath: local) }
+            DispatchQueue.main.async { done(ok) }
+        }
+
+        blobSink = { chunk in
+            if chunk.isEmpty {
+                let ok = received > 0 && (expected == 0 || received >= expected)
+                if !ok {
+                    Log.write("indirme eksik: \(received)/\(expected) bayt — \(path)")
+                }
+                finish(ok)
+                return
+            }
+            handle.write(chunk)
+            received += chunk.count
+            if let progress { DispatchQueue.main.async { progress(received, expected) } }
+        }
+
+        request("files.read", ["path": path]) { data, err in
+            if let err {
+                Log.write("indirme reddedildi (\(path)): \(err)")
+                finish(false); return
+            }
+            expected = data?["size"] as? Int ?? 0
+            if expected == 0 { Log.write("indirme: boyut 0 — \(path)") }
+        }
+
+        // Guvenlik agi: telefon susarsa sonsuza kadar bekleme.
+        queue.asyncAfter(deadline: .now() + 300) {
+            if !finished { finish(false) }
+        }
+    }
+
     /// Cihazdan `bytes` kadar veri cekip MB/s olcer.
     ///
     /// Gercek yuk uzerinden olcum: kuramsal hiz yerine bu baglantida

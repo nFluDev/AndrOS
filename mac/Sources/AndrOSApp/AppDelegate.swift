@@ -42,7 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var mirrorEmbedded = false
     private var statusMenuItem: NSMenuItem?
     private var connectItem: NSMenuItem?
-    private var dockItem: NSMenuItem?
     private var autoItem: NSMenuItem?
     private var screenItem: NSMenuItem?
     private var topItem: NSMenuItem?
@@ -51,7 +50,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var bitRate = UserDefaults.standard.object(forKey: "bitRate") as? Int ?? 24_000_000
     private var maxFPS  = UserDefaults.standard.object(forKey: "maxFPS")  as? Int ?? 60
     // Artik varsayilan GORUNUR: kullanici dock'tan/Cmd+Tab'den odaklanabilsin.
-    private var showInDock = UserDefaults.standard.object(forKey: "showInDock") as? Bool ?? true
+    /// Dock'ta ve ⌘Tab'de GORUNMESIN (varsayilan).
+    ///
+    /// AndrOS bir menu cubugu uygulamasi: pencereyi kapatinca arka
+    /// planda calismaya devam ediyor. Dock'ta durursa "kapattim ama hala
+    /// aciik" hissi veriyor ve ⌘Tab'i sisiriyor. Isteyen ayarlardan
+    /// geri acabiliyor.
+    /// Dock ve ⌘Tab, PENCERE DURUMUNU izliyor.
+    ///
+    /// Windows'taki gibi: ana pencere aciksa uygulama Dock'ta ve
+    /// ⌘Tab'de — oraya gecebilmek gerekiyor. Kirmizi dugmeyle pencereyi
+    /// kapatinca ikisinden de kalkiyor, cunku artik gecilecek bir sey
+    /// yok; uygulama menu cubugunda yasamaya devam ediyor.
+    ///
+    /// Bunu bir AYAR yapmak yanlisti: kullanicinin istedigi sey durum
+    /// degil davranis.
+    func syncActivationPolicy() {
+        let visible = NSApp.windows.contains { w in
+            guard w.isVisible, !w.isMiniaturized else { return false }
+            // Popover ve durum penceresi sayilmaz; yalnizca gercek
+            // pencereler Dock'a girmeyi hak ediyor.
+            return w.styleMask.contains(.titled) && w.canBecomeMain
+        }
+        let want: NSApplication.ActivationPolicy = visible ? .regular : .accessory
+        guard NSApp.activationPolicy() != want else { return }
+        // Politika degisince AppKit acik pencereleri arka plana atiyor;
+        // gorunur olanlari not alip sonra geri getiriyoruz.
+        let wasVisible = NSApp.windows.filter { $0.isVisible && !$0.isMiniaturized }
+        NSApp.setActivationPolicy(want)
+        if want == .regular {
+            DispatchQueue.main.async {
+                for w in wasVisible { w.orderFront(nil) }
+                wasVisible.last?.makeKey()
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+    }
+
     private var autoConnect = UserDefaults.standard.object(forKey: "autoConnect") as? Bool ?? true
     private var screenOff = UserDefaults.standard.object(forKey: "screenOff") as? Bool ?? true
     // Varsayilan KAPALI: acik oldugunda diger pencereleri kapatiyor ve
@@ -88,7 +123,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return
         }
         // Varsayilan: dock'ta HIC gorunme, yalniz menu cubugunda tek simge.
-        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+        // Baslangicta pencere yok: menu cubugu kipi.
+        NSApp.setActivationPolicy(.accessory)
         buildMainMenu()
         buildStatusItem()
         registerHotKey()
@@ -156,8 +192,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let wantCam = UserDefaults.standard.object(forKey: "mbCamera") as? Bool ?? true
             if !wantCam { CameraStatusItem.shared.hide() }
             else if CameraBridge.shared.state == .on { CameraStatusItem.shared.show() }
+            PlayerStatusItem.shared.sync()
         }
 
+        // Menu cubugu oynaticisi: calan degisince gorunsun/gizlensin.
+        PlayerStatusItem.shared.onOpenApp = { [weak self] in
+            self?.main?.showWindow(nil)
+            self?.main?.select(NowPlaying.shared.kind == .video ? .gallery : .music)
+        }
+        NowPlaying.shared.addObserver("menubar") {
+            PlayerStatusItem.shared.sync()
+        }
+        MusicEngine.shared.addObserver("menubar") {
+            PlayerStatusItem.shared.sync()
+        }
+
+        scheduleUpdateCheck()
         Notify.shared.setup()
         // macOS bildirim merkezindeki dugmeler GERCEKTEN calissin:
         // banner uzerinden yazilan yanit telefona gidiyor, "okundu"
@@ -175,7 +225,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             DispatchQueue.global().async { d.dismissNotification(key) }
             Notify.withdraw(key)
         }
-        Notify.shared.onOpen = { [weak self] _ in
+        Notify.shared.onOpen = { [weak self] key in
+            // Guncelleme bildirimi: dogrudan indirmeye goturur.
+            if key.hasPrefix("andros.update."),
+               let u = UserDefaults.standard.string(forKey: "pendingUpdateURL"),
+               let url = URL(string: u) {
+                NSWorkspace.shared.open(url)
+                return
+            }
             self?.main?.showWindow(nil)
             self?.main?.select(.notifications)
         }
@@ -188,6 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     /// AndrOS ana penceresi (kategoriler + icerik).
     @objc func showHub() {
+        defer {
+            // Pencere acildi: Dock ve ⌘Tab'e gir.
+            DispatchQueue.main.async { [weak self] in self?.syncActivationPolicy() }
+        }
         if main == nil {
             let m = MainWindowController()
             m.session = session
@@ -623,6 +684,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         companionLinks.values.first { $0.state == .ready }
     }
 
+    /// Otomatik guncelleme denetimi.
+    ///
+    /// Gunde BIR kez ve sessizce: yeni surum varsa bildirim cikiyor,
+    /// yoksa hicbir sey olmuyor. Acilista hemen sormuyoruz — uygulama
+    /// yeni acilmisken ag beklemek acilisi geciktirir.
+    ///
+    /// OTOMATIK KURULUM YOK. macOS'ta imzasiz bir uygulamanin kendini
+    /// yerine koymasi Gatekeeper'a takilir; Android da sessiz kuruluma
+    /// izin vermiyor. Indirmeyi aciyoruz, kurulumu kullanici onayliyor.
+    private func scheduleUpdateCheck() {
+        guard UserDefaults.standard.object(forKey: "autoUpdate") as? Bool ?? true
+        else { return }
+        let last = UserDefaults.standard.double(forKey: "lastUpdateCheck")
+        let now = Date().timeIntervalSince1970
+        guard now - last > 24 * 3600 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+            UserDefaults.standard.set(now, forKey: "lastUpdateCheck")
+            Updates.check { r in
+                guard case .available(let v, let url, _) = r else { return }
+                Log.write("yeni sürüm var: \(v)")
+                Notify.post(title: L("AndrOS \(v) çıktı", "AndrOS \(v) is out"),
+                            body: L("İndirmek için tıkla.", "Click to download."),
+                            id: "andros.update.\(v)")
+                UserDefaults.standard.set(url, forKey: "pendingUpdateURL")
+            }
+        }
+    }
+
     /// Bildirim eylemleri icin veri katmani.
     ///
     /// Panel acik olmayabilir (bildirime Mac'in bildirim merkezinden
@@ -689,6 +778,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     let bridge = self?.linkForData.map { CompanionBridge($0) }
                     ad.companion = bridge
                     dataLayer = ad
+                    // Kuyruk da uygulama yolunu kullanabilsin.
+                    TransferQueue.shared.data = ad
                     // YOKLAMA SEYREK. Her 3 saniyede birkac adb kabuk
                     // cagrisi demekti; galeri/muzik ayni anda calisirken
                     // adb doyuyor ve panellerin istekleri zaman asimina
@@ -736,6 +827,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 var ad = AndroidData(adb: adb)
                 ad.companion = self?.linkForData.map { CompanionBridge($0) }
                 dataLayer = ad
+                TransferQueue.shared.data = ad
                 var caps = AndroidData.Capabilities()
                 caps.sms = true; caps.contacts = true; caps.callLog = true
                 caps.media = true; caps.files = true
@@ -814,17 +906,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         langItem.submenu = langMenu
         appMenu.addItem(langItem)
 
-        dockItem = add(appMenu, L("Dock'ta göster", "Show in Dock"), #selector(toggleDock))
-        dockItem?.state = showInDock ? .on : .off
-        // macOS'ta Dock simgesi ile ⌘Tab AYNI seye bagli (activation policy);
-        // kapatinca uygulama ⌘Tab'den de cikar. Kullanici sasirmasin diye
-        // bunu menude yaziyoruz.
-        dockItem?.toolTip = L("Kapatılırsa AndrOS ⌘Tab listesinden de çıkar — "
-                            + "macOS bu ikisini aynı ayara bağlıyor. "
-                            + "Menü çubuğu simgesi her hâlükârda kalır.",
-                              "Turning this off also removes AndrOS from ⌘Tab — "
-                            + "macOS ties the two together. "
-                            + "The menu bar icon stays either way.")
         appMenu.addItem(.separator())
 
         let services = NSMenuItem(title: L("Servisler", "Services"), action: nil, keyEquivalent: "")
@@ -1174,6 +1255,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             self?.main?.showWindow(nil)
             self?.main?.select(c)
         }
+        // Ayarlar menu cubugundan da acilsin: pencereyi acip sag alt
+        // kosedeki disliyi aramak gereksiz.
+        panel.onOpenSettings = { [weak self] in
+            self?.statusHost.close()
+            self?.main?.showWindow(nil)
+            self?.main?.openSettings()
+        }
         var mirroring = false
         if case .running = session.state { mirroring = true }
         panel.refresh(deviceLabel: lastDeviceLabel,
@@ -1323,23 +1411,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         w.makeFirstResponder(view)
-    }
-
-    @objc private func toggleDock() {
-        showInDock.toggle()
-        UserDefaults.standard.set(showInDock, forKey: "showInDock")
-        dockItem?.state = showInDock ? .on : .off
-
-        // Etkinlik politikasi degisince AppKit acik pencereleri ARKA PLANA
-        // atiyor; kullanicinin gozunde pencere "kapaniyor" (cikis degil).
-        // Hangileri gorunurduyse not alip politikadan SONRA geri getiriyoruz.
-        let wasVisible = NSApp.windows.filter { $0.isVisible && !$0.isMiniaturized }
-        NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
-        DispatchQueue.main.async {
-            for w in wasVisible { w.orderFront(nil) }
-            wasVisible.last?.makeKey()
-            NSApp.activate(ignoringOtherApps: true)
-        }
     }
 
     @objc private func toggleOnTop() {

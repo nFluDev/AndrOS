@@ -45,6 +45,11 @@ public final class TransferQueue {
         self.serial = serial
     }
 
+    /// Veri katmani: eslesmis uygulama varsa indirme ONDAN yapiliyor.
+    /// adb yalnizca geri dusus — USB cikinca ve hata ayiklama kapaninca
+    /// `adb pull` calismiyor ve kuyruktaki hicbir sey inmiyordu.
+    public var data: AndroidData?
+
     public var snapshot: [Item] {
         lock.lock(); defer { lock.unlock() }
         return items
@@ -112,7 +117,17 @@ public final class TransferQueue {
         let busy = running
         let next = items.first { $0.state == .waiting }
         lock.unlock()
-        guard !busy, let item = next, let adb = adbPath else { return }
+        // ADB SART DEGIL.
+        //
+        // Buradaki `let adb = adbPath` kosulu, adb yapilandirilmamisken
+        // (USB yok, hata ayiklama kapali) kuyrugu TAMAMEN olduruyordu:
+        // ogeler "sirada" kalip hic baslamiyordu — kullanicinin gordugu
+        // "queued oluyor devam etmiyor" tam olarak buydu. Uygulama
+        // koprusu varken adb'ye hic ihtiyac yok.
+        guard !busy, let item = next else { return }
+        let adb = adbPath
+        let appReady = data?.companion?.isReady == true
+        guard adb != nil || appReady else { return }
 
         lock.lock(); running = true; lock.unlock()
         item.state = .running
@@ -120,6 +135,34 @@ public final class TransferQueue {
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
+
+            // UYGULAMA YOLU once (indirmede): adb'siz calismak hedef.
+            if item.direction == .download, let d = self.data,
+               d.companion?.isReady == true {
+                let ok = d.pullPreferringApp(item.remote, to: item.local) { got, total in
+                    guard total > 0 else { return }
+                    item.progress = min(100, got * 100 / total)
+                    self.notify()
+                }
+                if item.state != .cancelled {
+                    item.state = ok ? .done : .failed
+                    item.progress = ok ? 100 : item.progress
+                }
+                item.onFinish?(ok)
+                self.lock.lock(); self.running = false; self.lock.unlock()
+                self.notify()
+                self.pump()
+                return
+            }
+
+            // Buraya adb ile geldiysek yol kesin var.
+            guard let adb else {
+                item.state = .failed
+                item.onFinish?(false)
+                self.lock.lock(); self.running = false; self.lock.unlock()
+                self.notify(); self.pump()
+                return
+            }
             var args = self.serial.map { ["-s", $0] } ?? []
             args += item.direction == .download
                 ? ["pull", item.remote, item.local]

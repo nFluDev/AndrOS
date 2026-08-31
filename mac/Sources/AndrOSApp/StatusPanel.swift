@@ -20,6 +20,7 @@ final class StatusPanel: NSViewController {
     var onCamera: ((Bool) -> Void)?
     var onMicrophone: ((Bool) -> Void)?
     var onOpenCategory: ((MainWindowController.Category) -> Void)?
+    var onOpenSettings: (() -> Void)?
 
     private let deviceName = NSTextField(labelWithString: "")
     private let deviceState = NSTextField(labelWithString: "")
@@ -112,15 +113,22 @@ final class StatusPanel: NSViewController {
         jumps.distribution = .fillEqually
         jumps.spacing = 6
 
+        let settings = NSButton(title: L("Ayarlar…", "Settings…"),
+                                target: self, action: #selector(settingsTapped))
+        settings.bezelStyle = .rounded
         let quit = NSButton(title: L("AndrOS'tan çık", "Quit AndrOS"),
                             target: self, action: #selector(quitTapped))
         quit.bezelStyle = .rounded
+        let bottom = NSStackView(views: [settings, quit])
+        bottom.orientation = .horizontal
+        bottom.distribution = .fillEqually
+        bottom.spacing = 8
 
         let sep1 = NSBox(); sep1.boxType = .separator
         let sep2 = NSBox(); sep2.boxType = .separator
 
         let stack = NSStackView(views: [head, sep1, audioRow, micRow, camRow,
-                                        sep2, quick, wake, jumps, quit])
+                                        sep2, quick, wake, jumps, bottom])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 11
@@ -137,7 +145,7 @@ final class StatusPanel: NSViewController {
             quick.widthAnchor.constraint(equalToConstant: width),
             jumps.widthAnchor.constraint(equalToConstant: width),
             wake.widthAnchor.constraint(equalToConstant: width),
-            quit.widthAnchor.constraint(equalToConstant: width),
+            bottom.widthAnchor.constraint(equalToConstant: width),
         ])
         view = root
     }
@@ -205,6 +213,7 @@ final class StatusPanel: NSViewController {
     @objc private func openTapped()    { onOpenApp?() }
     @objc private func wakeTapped()    { onWakePhone?() }
     @objc private func quitTapped()    { onQuit?() }
+    @objc private func settingsTapped() { onOpenSettings?() }
 
     @objc private func jumpTapped(_ sender: NSButton) {
         guard let raw = sender.identifier?.rawValue,

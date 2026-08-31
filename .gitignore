@@ -20,3 +20,6 @@ android/.kotlin/
 # Web sitesi AYRI ve OZEL bir depoda (andros-web).
 # Acik kaynak depoya sizmasin.
 web/
+
+# Yayin paketleri (GitHub Releases uzerinden dagitiliyor)
+dist/

@@ -1671,3 +1671,87 @@ Dokploy'da alan adi baglanirken port bos birakilinca varsayilan
 **3000**'e gidiyor; kap yalnizca 80'de dinledigi icin `502 Bad Gateway`
 aliniyordu. nginx artik ikisini de dinliyor — kabin icinde ek maliyeti
 yok ve hangi degeri verirsen ver calisiyor.
+
+## Bildirim dugmeleri sessizce calismiyordu: "|" ayirici
+
+Dugme kimligini `"\(key)|\(index)"` diye kuruyor, sonra `split(separator: "|")`
+ile ayiriyordum. Ama **Android bildirim anahtarlarinin icinde zaten "|" var**:
+
+    0|com.whatsapp|1|null|10123
+
+Parca sayisi ikiyi astigi icin `guard parts.count == 2` her seferinde
+dusuyor ve dugme HICBIR SEY yapmiyordu — hata da vermiyordu. Artik SON
+ayiricidan bolunuyor. Eylem basarisiz olursa artik sebep yaziliyor.
+
+## Muzik: adb'siz indirme
+
+USB cikip hata ayiklama kapaninca `adb pull` calismiyor; parcalar
+kuyruga giriyor ama hicbiri inmiyordu. `CompanionLink.downloadFile`
+eklendi: `files.read` once JSON basligi sonra 256 KB'lik bloklar
+yolluyor, bos blok "bitti" demek. `TransferQueue` indirmede once
+UYGULAMA yolunu deniyor, adb yalnizca geri dusus.
+
+Blok alicisi TEK oldugu icin bu cagri es zamanli calisamaz; sirayi
+`CompanionBridge.pullGate` tutuyor.
+
+### Sonsuz atlama zinciri
+
+Bir parca acilamayinca siradakine geciyorduk — tek bozuk dosya listeyi
+durdurmasin diye. Ama telefon erisilemezken HER parca basarisiz oluyor
+ve zincir hic bitmiyordu; her adimda yeni bir indirme kuyruga giriyordu
+(kullanici "tonlarca indirme" gordu). Ust uste 3 basarisizlikta calma
+duruyor ve sebep basligta yaziliyor. Onden indirme de yalniz
+BASARIDAN sonra calisiyor.
+
+## Menu cubugunda oynatici
+
+Muzik ya da video calarken menu cubugunda simge + parca adi; tiklayinca
+kapak, kaydirac ve kontroller. Uygulama penceresi kapaliyken de calani
+gormek ve durdurmak gerekiyor — pencereyi acmak icin sebep olmamali.
+Ayar (`mbPlayer`) kapaliysa oge hic olusmuyor.
+
+Denetim paneline **Ayarlar…** dugmesi eklendi: pencereyi acip sag alt
+kosedeki disliyi aramak gereksiz.
+
+## Site 403: icerik imaja gomuldu
+
+Bagli birimle (bind mount) 403 aliniyordu — gorece yollar dagitim
+ortaminda bekledigim yere cozulmuyor ve nginx bos bir kok goruyor.
+`Dockerfile` icerigi imaja kopyaliyor. Ayrica kok istegi acikca
+`index.html`'e gidiyor; `$uri/` dizin denemesi dizin listesi kapaliyken
+403 uretebiliyor.
+
+## Dock ve ⌘Tab: ayar degil DAVRANIS
+
+Once bir ayar anahtariydi ("Dock'ta goster") ve yanlisti. Dogru
+davranis Windows'taki gibi: **ana pencere aciksa** uygulama Dock'ta ve
+⌘Tab'de — oraya gecebilmek gerekiyor. Kirmizi dugmeyle pencere
+kapaninca ikisinden de kalkiyor, cunku gecilecek bir sey kalmiyor;
+uygulama menu cubugunda yasamaya devam ediyor.
+
+`AppDelegate.syncActivationPolicy()` gorunur, basliki ve ana olabilen
+bir pencere var mi diye bakip `.regular` / `.accessory` seciyor.
+Cagrildigi iki yer: pencere acilisi (`showHub`) ve
+`NSWindow.willCloseNotification`.
+
+Politika degisince AppKit acik pencereleri arka plana atiyor; gorunur
+olanlar not alinip sonra one getiriliyor.
+
+Ayar anahtari ve menu ogesi KALDIRILDI — kullanicinin istedigi sey bir
+durum degil, bir davranisti.
+
+## Muzik yolu: yine mutlak yol
+
+`music.tracks` yalnizca `DISPLAY_NAME` gonderiyordu; Mac indirmeye
+calisinca telefon "Bu dosya disarida" deyip reddediyordu (olculdu:
+`indirme reddedildi (After_Dark.mp3)`). `MediaStore.Audio.Media.DATA`
+eklendi. Galeride ayni hata daha once duzeltilmisti — muzikte kalmis.
+
+adb ile calisirken sorun cikmamasinin sebebi: adb sorgusu zaten mutlak
+yol donduruyordu. Kaynak uygulamaya gecince yol kayboldu.
+
+## Menu cubugu oynaticisi
+
+Baslik KISA (12 karakter) ve uzunsa KAYIYOR: tam ad menu cubugunun
+ucte birini yiyordu. Panelde carpi dugmesi kaldirildi — seritteki
+"kapat" zaten calmayi bitiriyor, ikisi birden kafa karistiriyordu.
