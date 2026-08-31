@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>              <string>AndrOSAudio</string>
+    <key>CFBundleIdentifier</key>        <string>dev.naer.andros.audio</string>
+    <key>CFBundleExecutable</key>        <string>AndrOSAudio</string>
+    <key>CFBundlePackageType</key>       <string>BNDL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key>           <string>1</string>
+    <key>CFPlugInFactories</key>
+    <dict>
+        <!-- Fabrika kimligi: coreaudiod eklentiyi bununla bulur. -->
+        <key>3F2A9C10-6B4E-4E1C-9C2A-0A7B5D3E1F00</key>
+        <string>AndrOSAudioFactory</string>
+    </dict>
+    <key>CFPlugInTypes</key>
+    <dict>
+        <!-- kAudioServerPlugInTypeUUID -->
+        <key>443ABAB8-E7B3-491A-B985-BEB9187030DB</key>
+        <array>
+            <string>3F2A9C10-6B4E-4E1C-9C2A-0A7B5D3E1F00</string>
+        </array>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Yumusak dokunma efekti.
+     `?android:selectableItemBackgroundBorderless` cok genis ve parlak
+     bir dalga cikariyordu; kucuk bir dislide bu goze batiyor. Renk
+     kisildi ve yaricap dugmenin olcusune baglandi. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#26FFFFFF"
+    android:radius="18dp" />

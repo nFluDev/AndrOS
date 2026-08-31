@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>              <string>AndrOSCamera</string>
+    <key>CFBundleDisplayName</key>       <string>AndrOS Kamera</string>
+    <key>CFBundleIdentifier</key>        <string>dev.naer.andros.camera</string>
+    <key>CFBundleExecutable</key>        <string>AndrOSCamera</string>
+    <key>CFBundlePackageType</key>       <string>SYSX</string>
+    <key>CFBundleShortVersionString</key><string>1.4</string>
+    <key>CFBundleVersion</key>           <string>5</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>LSMinimumSystemVersion</key>    <string>13.0</string>
+    <key>CMIOExtension</key>
+    <dict>
+        <key>CMIOExtensionMachServiceName</key>
+        <string>dev.naer.andros.camera</string>
+    </dict>
+    <key>NSSystemExtensionUsageDescription</key>
+    <string>Telefonun kamerasını Mac uygulamalarına webcam olarak sunar.</string>
+</dict>
+</plist>
