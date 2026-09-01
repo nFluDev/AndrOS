@@ -31,6 +31,10 @@ public final class ScreenBridge {
     public private(set) var inputReady = false
 
     public var onState: ((State) -> Void)?
+    /// Dokunmanin calisip calismadigi DEGISTIGINDE. Durum degismeden
+    /// de degisebiliyor (kullanici erisilebilirligi sonradan aciyor),
+    /// o yuzden `onState` yetmiyor.
+    public var onInputReady: ((Bool) -> Void)?
     public var onFrame: ((CVPixelBuffer) -> Void)?
 
     private var conn: NWConnection?
@@ -155,13 +159,18 @@ public final class ScreenBridge {
                         as? [String: Any] else { break }
                 if let e = j["error"] as? String {
                     // "noinput" olumcul degil: goruntu akar, dokunma gitmez.
-                    if e == "noinput" { inputReady = false; Log.write("yansıtma: erişilebilirlik kapalı") }
+                    if e == "noinput" {
+                        if inputReady { Log.write("yansıtma: erişilebilirlik kapalı") }
+                        inputReady = false
+                        DispatchQueue.main.async { self.onInputReady?(false) }
+                    }
                     else { Log.write("yansıtma hatası: \(e)"); state = .failed(e) }
                     break
                 }
                 let w = j["width"] as? Int ?? 0, h = j["height"] as? Int ?? 0
                 size = CGSize(width: w, height: h)
                 inputReady = j["input"] as? Bool ?? false
+                DispatchQueue.main.async { self.onInputReady?(self.inputReady) }
                 Log.write("yansıtma: \(w)x\(h) · girdi: \(inputReady ? "açık" : "kapalı")")
             default: break
             }

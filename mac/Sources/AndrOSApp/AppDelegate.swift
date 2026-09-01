@@ -988,6 +988,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         wc.onClose   = { [weak self] in self?.stopAppMirroring() }
 
         bridge.onFrame = { [weak wc] px in wc?.mirror.show(px) }
+        bridge.onInputReady = { [weak wc] ok in wc?.setInputReady(ok) }
         bridge.onState = { [weak self] st in
             guard let self else { return }
             self.appMirror?.setInputReady(ScreenBridge.shared.inputReady)

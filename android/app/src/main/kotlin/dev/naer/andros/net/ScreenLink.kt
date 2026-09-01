@@ -50,6 +50,8 @@ class ScreenLink(
 
     private var width = 0
     private var height = 0
+    /// En son ne zaman "erisilebilirlik kapali" dedik.
+    private var lastNoInputAt = 0L
 
     fun start(): Int {
         stop()
@@ -202,7 +204,17 @@ class ScreenLink(
      * dokunmaya yol aciyordu.
      */
     private fun handleInput(json: String) {
-        val svc = InputService.instance ?: return
+        val svc = InputService.instance
+        if (svc == null) {
+            // Erisilebilirlik acilmamis. Mac'e SOYLE — sessizce yutmak
+            // "yansitma bozuk" izlenimi veriyordu. Her dokunusta degil,
+            // saniyede bir: kullanici ekrani ovusturunca sel olurdu.
+            val now = System.currentTimeMillis()
+            if (now - lastNoInputAt > 1000) { lastNoInputAt = now; sendError("noinput") }
+            return
+        }
+        // Hizmet SONRADAN acilmis olabilir: Mac'teki uyariyi kaldir.
+        if (lastNoInputAt != 0L) { lastNoInputAt = 0L; sendMeta() }
         val o = runCatching { JSONObject(json) }.getOrNull() ?: return
         fun px(key: String) = (o.optDouble(key, 0.0) * width).toFloat()
         fun py(key: String) = (o.optDouble(key, 0.0) * height).toFloat()
