@@ -692,6 +692,21 @@ do {
         hub.stop()
         if mode == "listen" { print(got ? "MESAJ ALINDI" : "MESAJ GELMEDI"); exit(got ? 0 : 1) }
 
+    // Dis adresi ogrenme sinamasi.
+    //   androsctl stun [sunucu] [port]
+    case "stun":
+        let host = args.count > 1 ? args[1] : Stun.defaultHost
+        let port = args.count > 2 ? (UInt16(args[2]) ?? 3478) : Stun.defaultPort
+        let fd = Stun.makeSocket()
+        guard fd >= 0 else { print("soket açılamadı"); exit(1) }
+        defer { close(fd) }
+        if let m = Stun.discover(socket: fd, host: host, port: port) {
+            print("dış adresim: \(m.host):\(m.port)  (\(host):\(port) söyledi)")
+        } else {
+            print("STUN yanıt vermedi — \(host):\(port) ulaşılabilir mi?")
+            exit(1)
+        }
+
     case "parse":
         guard args.count >= 2 else { bad("kullanim: androsctl parse <dosya.h264|.h265>"); exit(1) }
         let path = args[1]
