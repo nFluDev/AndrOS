@@ -25,7 +25,10 @@ import javax.crypto.spec.SecretKeySpec
 class SignalClient(
     private val keys: Keys,
     private val url: String,
-    private val salt: String,
+    /// Numara ozetinin tuzu. SUNUCUDAN geliyor: uygulamaya gommek hem
+    /// paketten cikarilabilir olurdu hem de sunucu sahibini uygulamayi
+    /// yeniden derlemeye zorlardi.
+    private var salt: String = "",
 ) {
     enum class State { OFFLINE, CONNECTING, READY }
 
@@ -35,8 +38,11 @@ class SignalClient(
     @Volatile private var closedByUs = false
     private var attempt = 0
 
-    /// Bu cihazin bulunabilecegi numaralarin ozetleri.
+    /// Bu cihazin bulunabilecegi HAM numaralari. Ozetleri baglanti
+    /// kurulunca hesaplaniyor — ham numara sunucuya hicbir zaman
+    /// gitmiyor.
     var myNumbers: List<String> = emptyList()
+        set(value) { field = value; if (state == State.READY) publishNumbers() }
 
     var onState: ((State) -> Unit)? = null
     /// Zarf geldi: (gonderen kimlik, ham zarf).
@@ -86,17 +92,19 @@ class SignalClient(
                 // Kimligi ISPATLA: sunucunun verdigi rastgele meydan
                 // okumayi imzaliyoruz. Hesap ve parola yok.
                 val challenge = Base64.decode(m.optString("challenge"), Base64.DEFAULT)
-                val numbers = JSONArray().also { a -> myNumbers.forEach { a.put(it) } }
                 sock.send(JSONObject()
                     .put("t", "auth")
                     .put("key", b64(keys.edPublic.encoded))
-                    .put("sig", b64(keys.sign(challenge)))
-                    .put("numbers", numbers).toString())
+                    .put("sig", b64(keys.sign(challenge))).toString())
             }
             "ready" -> {
                 attempt = 0
+                m.optString("salt").takeIf { it.isNotEmpty() }?.let { salt = it }
                 Log.i(TAG, "sinyal hazir: ${m.optString("id")}")
                 set(State.READY)
+                // Numaralar ANCAK SIMDI bildirilebilir: ozet tuzu
+                // gerektiriyor ve tuz bu iletiyle geldi.
+                publishNumbers()
             }
             "recv" -> {
                 val env = Base64.decode(m.optString("env"), Base64.DEFAULT)
@@ -116,6 +124,14 @@ class SignalClient(
             "undeliverable" -> onUndeliverable?.invoke(m.optString("to"))
             "error" -> Log.w(TAG, "sunucu hatasi: ${m.optString("why")}")
         }
+    }
+
+    private fun publishNumbers() {
+        val s = ws ?: return
+        val digests = myNumbers.map { digest(it) }.filter { it.isNotEmpty() }
+        if (digests.isEmpty()) return
+        val a = JSONArray().also { arr -> digests.forEach { arr.put(it) } }
+        s.send(JSONObject().put("t", "numbers").put("of", a).toString())
     }
 
     /** Sifreli zarfi kime gidecekse ona iletir. */
@@ -160,6 +176,9 @@ class SignalClient(
      * sunucu ayni ozeti uretmezse esleme tutmaz.
      */
     fun digest(number: String): String {
+        // Tuz yoksa ozet hesaplanamaz: bos donmek, yanlis ozet uretip
+        // sessizce hic eslesmemekten iyi.
+        if (salt.isEmpty()) return ""
         val e164 = normalize(number)
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(salt.toByteArray(), "HmacSHA256"))

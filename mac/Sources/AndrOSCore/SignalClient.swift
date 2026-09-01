@@ -25,13 +25,27 @@ public final class SignalClient: NSObject {
 
     private let keys: SignalKeys
     private let url: URL
-    private let salt: String
+    /// Numara ozetinin tuzu. SUNUCUDAN geliyor: istemcinin hesapladigi
+    /// ozetin sunucununkiyle tutmasi gerekiyor ve tuzu uygulamaya
+    /// gommek hem paketten cikarilabilir olurdu hem de sunucu sahibini
+    /// uygulamayi yeniden derlemeye zorlardi.
+    private var salt: String
     private var task: URLSessionWebSocketTask?
     private var session: URLSession!
     private var closedByUs = false
     private var attempt = 0
-    /// Bu Mac'in bulunabilecegi numaralarin ozetleri (telefonun hatti).
-    public var myNumbers: [String] = []
+    /// Bu Mac'in bulunabilecegi HAM numaralar (telefonun hatti).
+    /// Ozetleri baglanti kurulunca hesaplaniyor — ham numara sunucuya
+    /// hicbir zaman gitmiyor.
+    public var myNumbers: [String] = [] {
+        didSet { if state == .ready { publishNumbers() } }
+    }
+
+    private func publishNumbers() {
+        let digests = myNumbers.map { digest($0) }.filter { !$0.isEmpty }
+        guard !digests.isEmpty else { return }
+        _ = say(["t": "numbers", "of": digests])
+    }
 
     /// `wss://` zorunlu. TEK istisna geri dongu adresi: orada trafik
     /// makineden hic cikmiyor ve sinama sunucusuna sertifika kurmak
@@ -41,7 +55,7 @@ public final class SignalClient: NSObject {
         return url.hasPrefix("ws://127.0.0.1") || url.hasPrefix("ws://localhost")
     }
 
-    public init?(keys: SignalKeys, url: String, salt: String) {
+    public init?(keys: SignalKeys, url: String, salt: String = "") {
         guard Self.isAllowed(url), let u = URL(string: url) else {
             Log.write("sinyal: wss:// dışında adres kabul edilmiyor")
             return nil
@@ -129,10 +143,13 @@ public final class SignalClient: NSObject {
             else { return }
             _ = say(["t": "auth",
                      "key": keys.edPublic.base64EncodedString(),
-                     "sig": keys.sign(c).base64EncodedString(),
-                     "numbers": myNumbers])
+                     "sig": keys.sign(c).base64EncodedString()])
         case "ready":
             attempt = 0
+            if let s = m["salt"] as? String, !s.isEmpty { salt = s }
+            // Numaralar ANCAK SIMDI bildirilebilir: ozet tuzu
+            // gerektiriyor ve tuz bu iletiyle geldi.
+            publishNumbers()
             Log.write("sinyal hazır: \(m["id"] as? String ?? "?")")
             state = .ready
         case "recv":
@@ -181,6 +198,9 @@ public final class SignalClient: NSObject {
     /// Numaranin sunucuya gidecek OZETI — numaranin kendisi hicbir
     /// zaman gonderilmiyor.
     public func digest(_ number: String) -> String {
+        // Tuz yoksa ozet hesaplanamaz: bos donmek, yanlis ozet
+        // uretip sessizce hic eslesmemekten iyi.
+        guard !salt.isEmpty else { return "" }
         let e164 = Self.normalize(number)
         let key = SymmetricKey(data: Data(salt.utf8))
         let mac = HMAC<SHA256>.authenticationCode(for: Data(e164.utf8), using: key)

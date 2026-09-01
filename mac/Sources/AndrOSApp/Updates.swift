@@ -40,7 +40,24 @@ enum Updates {
             else { finish(.failed("yanıt okunamadı")); return }
             // Taslaklar haric; on surumler DAHIL (beta kullaniyoruz).
             let usable = all.filter { ($0["draft"] as? Bool ?? false) == false }
-            guard let j = usable.first, let tag = j["tag_name"] as? String else {
+
+            // LISTENIN SIRASINA GUVENME.
+            //
+            // Olculdu: GitHub bu ucu tarihe gore DEGIL etiket adina gore
+            // siraliyor. "v0.1.0-beta.10" metin olarak "v0.1.0-beta.1"in
+            // hemen ardina dusuyor, yani en yeni surum listenin
+            // SONLARINDA kaliyor. Ilk kaydi "en yeni" saymak beta.9'u
+            // gosteriyor ve yeni betalar hic gorunmuyordu.
+            let newest = usable.max { a, b in
+                let x = ((a["tag_name"] as? String) ?? "").hasPrefix("v")
+                    ? String(((a["tag_name"] as? String) ?? "").dropFirst())
+                    : ((a["tag_name"] as? String) ?? "")
+                let y = ((b["tag_name"] as? String) ?? "").hasPrefix("v")
+                    ? String(((b["tag_name"] as? String) ?? "").dropFirst())
+                    : ((b["tag_name"] as? String) ?? "")
+                return isNewer(y, than: x)
+            }
+            guard let j = newest, let tag = j["tag_name"] as? String else {
                 finish(.noReleases); return
             }
             let remote = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag

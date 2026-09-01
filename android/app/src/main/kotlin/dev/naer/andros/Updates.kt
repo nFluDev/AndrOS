@@ -50,10 +50,21 @@ object Updates {
                     done(Result.Failed("HTTP ${c.responseCode}")); return@thread
                 }
                 val arr = org.json.JSONArray(c.inputStream.bufferedReader().readText())
+                // LISTENIN SIRASINA GUVENME.
+                //
+                // Olculdu: GitHub bu ucu tarihe gore DEGIL etiket adina
+                // gore siraliyor. "v0.1.0-beta.10" metin olarak
+                // "v0.1.0-beta.1"in hemen ardina dusuyor, yani en yeni
+                // surum listenin SONLARINDA kaliyor. Ilk kaydi "en yeni"
+                // saymak beta.9'u gosteriyordu ve yeni betalar hic
+                // gorunmuyordu.
                 var json: org.json.JSONObject? = null
+                var best = ""
                 for (i in 0 until arr.length()) {
                     val o = arr.optJSONObject(i) ?: continue
-                    if (!o.optBoolean("draft", false)) { json = o; break }
+                    if (o.optBoolean("draft", false)) continue
+                    val tag = o.optString("tag_name").removePrefix("v")
+                    if (json == null || isNewer(tag, best)) { json = o; best = tag }
                 }
                 if (json == null) { done(Result.NoReleases); return@thread }
                 val tag = json.optString("tag_name").removePrefix("v")

@@ -627,14 +627,17 @@ do {
         guard let c = SignalClient(keys: k, url: addr, salt: salt) else {
             print("adres kabul edilmedi"); exit(1)
         }
-        let digest = c.digest("0532 111 22 33")
-        c.myNumbers = [digest]
+        c.myNumbers = ["0532 111 22 33"]
         var done = false
         c.onState = { st in
             print("durum: \(st)")
             if st == .ready {
+                // Ozet ancak tuz gelince hesaplanabiliyor.
+                let digest = c.digest("0532 111 22 33")
                 print("kimlik: \(k.id) · numara özeti: \(digest)")
-                c.lookup([digest, c.digest("+905000000000")])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    c.lookup([digest, c.digest("+905000000000")])
+                }
             }
         }
         c.onPresence = { found, missing in
