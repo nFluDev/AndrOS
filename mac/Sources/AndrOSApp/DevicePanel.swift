@@ -43,6 +43,7 @@ final class DevicePanel: NSViewController, AndrOSPanel,
     private var wirelessButton: NSButton?
     private let advancedToggle = NSButton()
     private var advancedOpen = false
+    private var stateObserverInstalled = false
     private let audioToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let cameraToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let pairButton = NSButton()
@@ -207,7 +208,13 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         // "Kablosuz baglan" KALDIRILDI: uygulama zaten kendi TLS
         // baglantisiyla Wi-Fi uzerinden calisiyor; adb'yi tcpip kipine
         // almanin bir faydasi kalmadi.
-        let actions = NSStackView(views: [refresh, screenshot, reboot,
+        let reconnect = textButton(L("Yeniden bağlan", "Reconnect"), #selector(reconnectNow))
+        reconnect.toolTip = L("Bağlantı koptuysa yeniden kurar — uygulamayı kapatıp "
+                            + "açmaya gerek yok.",
+                              "Re-establishes a dropped connection — no need to restart "
+                            + "the app.")
+
+        let actions = NSStackView(views: [refresh, screenshot, reboot, reconnect,
                                           pairButton, NSView(), spinner])
         actions.orientation = .horizontal
         actions.spacing = 8
@@ -306,6 +313,14 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         matchTableWidth()
         // Uygulamayi calistiran telefonlar kendiliginden listeye dussun:
         // kullanici IP yazmasin, dugmeye basmasin.
+        if !stateObserverInstalled {
+            stateObserverInstalled = true
+            NotificationCenter.default.addObserver(
+                forName: .androsCompanionStateChanged, object: nil, queue: .main) { [weak self] _ in
+                guard let self, !self.view.isHiddenOrHasHiddenAncestor else { return }
+                self.applyFilter()
+            }
+        }
         browser.addListener("devicePanel") { [weak self] list in
             self?.companions = list
             self?.refreshList()
@@ -486,9 +501,24 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         // Tek satir, TUM yollar: "USB + Wi-Fi + AndrOS".
         let transports = d.transportLabel(appName: L("AndrOS", "AndrOS"))
         let needsPairing = d.companionId != nil && !d.companionPaired
-        let state = d.isOnline
-            ? (needsPairing ? L("eşleşme bekliyor", "not paired") : transports)
-            : L("çevrimdışı", "offline")
+        // CANLI durum: "eşleşmiş" olmak "bağlı" demek degil. Baglanti
+        // kopukken satir hala eslesmis gorunuyor ve kullanici neden
+        // calismadigini anlamiyordu.
+        let linked = d.companionId.map { CompanionStatus.isConnected($0) } ?? false
+        let connecting = d.companionId.map {
+            CompanionStatus.state($0) == .connecting
+        } ?? false
+        let state: String
+        if !d.isOnline {
+            state = L("çevrimdışı", "offline")
+        } else if needsPairing {
+            state = L("eşleşme bekliyor", "not paired")
+        } else if d.companionId != nil && !linked {
+            state = connecting ? L("bağlanıyor…", "connecting…")
+                               : L("eşleşmiş · bağlı değil", "paired · not connected")
+        } else {
+            state = transports
+        }
         // NOKTA YOK, renk yeterli: "● USB + Wi-Fi + AndrOS" satira
         // sigmiyor ve son kelime kesiliyordu ("…+ AndrO"). Durum zaten
         // renkle anlatiliyor.
@@ -496,7 +526,9 @@ final class DevicePanel: NSViewController, AndrOSPanel,
         sub.font = .systemFont(ofSize: 10)
         sub.lineBreakMode = .byTruncatingTail
         sub.textColor = needsPairing ? .systemOrange
-                      : (d.isOnline ? .systemGreen : .tertiaryLabelColor)
+                      : (!d.isOnline ? .tertiaryLabelColor
+                         : (d.companionId != nil && !linked) ? .systemOrange
+                                                             : .systemGreen)
 
         let texts = NSStackView(views: [name, sub])
         texts.orientation = .vertical
@@ -964,6 +996,15 @@ final class DevicePanel: NSViewController, AndrOSPanel,
             }
         }
         (NSApp.delegate as? AppDelegate)?.setCamera(on)
+    }
+
+    @objc private func reconnectNow() {
+        spinner.startAnimation(nil)
+        NotificationCenter.default.post(name: .androsReconnectRequested, object: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.spinner.stopAnimation(nil)
+            self?.refreshList()
+        }
     }
 
     @objc private func reload() {

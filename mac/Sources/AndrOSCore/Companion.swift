@@ -178,6 +178,9 @@ public final class CompanionBrowser {
         browser = b
     }
 
+    /// Bulmayi hemen tazele (kopan baglantidan sonra).
+    public func poke() { udp.probe() }
+
     public func stop() {
         started = false
         browser?.cancel()
@@ -592,6 +595,38 @@ public final class CompanionLink {
 // MARK: - Eslestirme kaydi
 
 /// Eslestirilmis telefonlarin belirteci ve sabitlenmis parmak izi.
+/// Baglantilarin CANLI durumu.
+///
+/// `CompanionStore` yalnizca "belirtec var mi" biliyor; cihaz satiri
+/// bunu "eslesmis" diye gosterip baglanti kopukken bile ayni kaliyordu.
+/// Arayuz gercek durumu gosterebilsin diye ayri bir kayit tutuyoruz.
+public enum CompanionStatus {
+    private static var states: [String: CompanionLink.State] = [:]
+    private static let lock = NSLock()
+
+    public static func set(_ id: String, _ s: CompanionLink.State) {
+        lock.lock(); states[id] = s; lock.unlock()
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .androsCompanionStateChanged, object: nil)
+        }
+    }
+
+    public static func state(_ id: String) -> CompanionLink.State {
+        lock.lock(); defer { lock.unlock() }
+        return states[id] ?? .idle
+    }
+
+    public static func isConnected(_ id: String) -> Bool { state(id) == .ready }
+}
+
+public extension Notification.Name {
+    static let androsCompanionStateChanged =
+        Notification.Name("androsCompanionStateChanged")
+    /// Kullanici elle "yeniden baglan" dedi.
+    static let androsReconnectRequested =
+        Notification.Name("androsReconnectRequested")
+}
+
 public final class CompanionStore {
     private let key = "companionDevices"
     public init() {}

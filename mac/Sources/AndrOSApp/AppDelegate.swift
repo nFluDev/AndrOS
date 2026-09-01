@@ -186,6 +186,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             forName: .androsDevicesListed, object: nil, queue: .main) { [weak self] n in
             self?.unifiedDevices = n.object as? [UnifiedDevice] ?? []
         }
+        // Elle "yeniden baglan": kullanici uygulamayi kapatip acmak
+        // zorunda kalmasin.
+        NotificationCenter.default.addObserver(
+            forName: .androsReconnectRequested, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            Log.write("elle yeniden bağlanma istendi")
+            // Once bulmayi tazele, sonra kopmus baglantilari kur.
+            self.companionBrowser.stop()
+            self.companionBrowser.start()
+            for (id, l) in self.companionLinks where l.state != .ready {
+                l.disconnect()
+                self.companionLinks.removeValue(forKey: id)
+            }
+            self.connectPairedCompanions()
+            self.refreshDevices()
+        }
+
         // Ayar degisince menu cubugu ogeleri hemen uysun.
         NotificationCenter.default.addObserver(
             forName: .androsSettingsChanged, object: nil, queue: .main) { _ in
@@ -320,12 +337,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         // Telefon uygulamasi arka planda oldurulup yeniden baslayabiliyor
         // ve Bonjour listesi degismedigi icin yeniden baglanma hic
         // tetiklenmiyordu; moduller de "uygulama gerekli" diyordu.
-        let keepAlive = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+        // Uygulamayi kapatip acmak GEREKMEMELI: kopan baglanti kendi
+        // kendine geri gelsin. Bulucu da bayatlayinca alt agi yeniden
+        // tariyor (bkz. UdpProbe.staleAfter).
+        let keepAlive = Timer(timeInterval: 4, repeats: true) { [weak self] _ in
             guard let self else { return }
             let before = self.readyCompanion != nil
             self.connectPairedCompanions()
             // Baglanti yeni kurulduysa veri katmanini tazele.
-            if !before, self.readyCompanion != nil { self.refreshDevices() }
+            if !before, self.readyCompanion != nil {
+                self.refreshDevices()
+                NotificationCenter.default.post(name: .androsRefresh, object: nil)
+            }
+            // Eslesmis ama HIC bulunamayan cihaz varsa bulmayi durtukle.
+            let pairedIDs = Set(self.companionStore.paired().map(\.id))
+            let seen = Set(self.companionDevices.map(\.id))
+            if !pairedIDs.isSubset(of: seen) { self.companionBrowser.poke() }
         }
         RunLoop.main.add(keepAlive, forMode: .common)
 
@@ -348,13 +375,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             var stale = false
             if existing?.state == .connecting || existing?.state == .awaitingCode,
                let since = existing?.stateChangedAt,
-               Date().timeIntervalSince(since) > 20 { stale = true }
+               Date().timeIntervalSince(since) > 12 { stale = true }
             if existing == nil || existing?.state == .idle
                 || existing?.state.isFailed == true || stale {
                 existing?.disconnect()
                 let l = CompanionLink(device: d, store: companionStore)
                 l.onState = { [weak self] st in
                     guard let self else { return }
+                    CompanionStatus.set(d.id, st)
                     if case .ready = st {
                         self.refreshDevices()
                         // Acik panel veriyi yeniden istesin.

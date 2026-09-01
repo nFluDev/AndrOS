@@ -29,6 +29,14 @@ public final class UdpProbe {
     /// Bulunanlar: cihaz kimligi -> kayit.
     private var seen: [String: Found] = [:]
     private let lock = NSLock()
+    /// En son NE ZAMAN cevap aldik.
+    ///
+    /// Bir kez cihaz bulununca yalnizca O ADRESI yokluyorduk; telefonun
+    /// IP'si degisince ya da telefon gidip gelince bir daha asla
+    /// bulunamiyordu ve kullanicinin uygulamayi kapatip acmasi
+    /// gerekiyordu. Cevap kesilirse alt agi yeniden tariyoruz.
+    private var lastReplyAt = Date.distantPast
+    private let staleAfter: TimeInterval = 15
 
     public var onFound: ((Found) -> Void)?
 
@@ -94,8 +102,10 @@ public final class UdpProbe {
 
         lock.lock()
         let known = seen.values.map(\.host)
+        let stale = Date().timeIntervalSince(lastReplyAt) > staleAfter
+        if stale { seen.removeAll() }          // gorunmeyeni "bulundu" sayma
         lock.unlock()
-        if known.isEmpty {
+        if known.isEmpty || stale {
             // Once GECEN SEFERKI adresler: cogu zaman degismiyor.
             let remembered = (UserDefaults.standard.dictionary(forKey: Self.storeKey)
                               as? [String: String])?.values ?? [:].values
@@ -191,6 +201,7 @@ public final class UdpProbe {
         seen[f.deviceId] = f
         lock.unlock()
         UdpProbe.remember(f.deviceId, f.host)
+        lock.lock(); lastReplyAt = Date(); lock.unlock()
         guard isNew else { return }
         Log.write("UDP bulucu: \(f.name) @ \(f.host):\(f.port)")
         DispatchQueue.main.async { self.onFound?(f) }

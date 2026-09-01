@@ -20,7 +20,11 @@ import kotlin.concurrent.thread
 object Updates {
 
     private const val TAG = "AndrOS.Updates"
-    private const val API = "https://api.github.com/repos/nFluDev/AndrOS/releases/latest"
+    /// TUM surumler — "/releases/latest" DEGIL.
+    ///
+    /// GitHub'in "latest" ucu ON SURUMLERI atliyor; beta yayinlarken
+    /// hicbir sey donmuyor ve 404 aliniyordu.
+    private const val API = "https://api.github.com/repos/nFluDev/AndrOS/releases?per_page=20"
 
     sealed class Result {
         object UpToDate : Result()
@@ -45,7 +49,13 @@ object Updates {
                 if (c.responseCode != 200) {
                     done(Result.Failed("HTTP ${c.responseCode}")); return@thread
                 }
-                val json = org.json.JSONObject(c.inputStream.bufferedReader().readText())
+                val arr = org.json.JSONArray(c.inputStream.bufferedReader().readText())
+                var json: org.json.JSONObject? = null
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    if (!o.optBoolean("draft", false)) { json = o; break }
+                }
+                if (json == null) { done(Result.NoReleases); return@thread }
                 val tag = json.optString("tag_name").removePrefix("v")
                 val notes = json.optString("body")
                 val apk = pickApk(json.optJSONArray("assets"))
@@ -70,13 +80,32 @@ object Updates {
         return null
     }
 
-    /// "1.10" > "1.9" olmali: metin karsilastirmasi bunu yanlis yapiyor.
+    /**
+     * Surum karsilastirmasi. Iki tuzak:
+     *  - "1.10" > "1.9" olmali; metin karsilastirmasi yanlis yapiyor.
+     *  - "0.1.0" > "0.1.0-beta.2" olmali; on surum ekini yok saymak
+     *    kesin surumu ESKI gosteriyor.
+     */
     private fun isNewer(remote: String, local: String): Boolean {
-        val a = remote.split(".", "-").mapNotNull { it.toIntOrNull() }
-        val b = local.split(".", "-").mapNotNull { it.toIntOrNull() }
-        for (i in 0 until maxOf(a.size, b.size)) {
-            val x = a.getOrElse(i) { 0 }
-            val y = b.getOrElse(i) { 0 }
+        fun parts(v: String): Pair<List<Int>, List<Int>> {
+            val split = v.split("-", limit = 2)
+            val core = split[0].split(".").mapNotNull { it.toIntOrNull() }
+            val pre = if (split.size > 1)
+                split[1].split(Regex("[^0-9]+")).mapNotNull { it.toIntOrNull() }
+            else emptyList()
+            return core to pre
+        }
+        val (ac, ap) = parts(remote)
+        val (bc, bp) = parts(local)
+        for (i in 0 until maxOf(ac.size, bc.size)) {
+            val x = ac.getOrElse(i) { 0 }
+            val y = bc.getOrElse(i) { 0 }
+            if (x != y) return x > y
+        }
+        if (ap.isEmpty() != bp.isEmpty()) return ap.isEmpty()
+        for (i in 0 until maxOf(ap.size, bp.size)) {
+            val x = ap.getOrElse(i) { 0 }
+            val y = bp.getOrElse(i) { 0 }
             if (x != y) return x > y
         }
         return false
