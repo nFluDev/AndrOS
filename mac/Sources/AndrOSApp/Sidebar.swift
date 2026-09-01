@@ -80,6 +80,29 @@ final class SidebarView: NSView {
     var onAction: ((SidebarAction) -> Void)?
     var onRightClick: ((SidebarAction) -> Void)?
     var visibleActions: [SidebarAction] = SidebarAction.defaultOrder { didSet { rebuild() } }
+
+    /// Uygulama yolu (adb'siz) etkin mi? Uc dugme orada BASKA is
+    /// yapiyor ve ipucu metni yaniltmasin diye burada degisiyor.
+    var appMode = false { didSet { if appMode != oldValue { rebuild() } } }
+
+    static func appTitle(_ a: SidebarAction) -> String {
+        switch a {
+        case .power:
+            return L("Hızlı ayarlar", "Quick settings")
+        case .screenOff:
+            return L("Telefon ekranını karart (yansıtma sürer)",
+                     "Dim the phone screen (mirroring continues)")
+        case .screenshot:
+            return L("Ekran görüntüsünü panoya kopyala",
+                     "Copy screenshot to the clipboard")
+        case .disconnect:
+            return L("Yansıtmayı kapat", "Stop mirroring")
+        case .rotate:
+            return L("Otomatik döndürmeyi aç/kapa", "Toggle auto-rotate")
+        default:
+            return a.title
+        }
+    }
     var toggleStates: [SidebarAction: Bool] = [:] { didSet { refreshStates() } }
 
     private var buttons: [SidebarAction: HoverButton] = [:]
@@ -153,7 +176,7 @@ final class SidebarView: NSView {
         b.imagePosition = .imageOnly
         b.image = NSImage(systemSymbolName: a.symbol, accessibilityDescription: a.title)?
             .withSymbolConfiguration(cfg)
-        b.toolTip = a.title
+        b.toolTip = appMode ? SidebarView.appTitle(a) : a.title
         b.target = self
         b.action = #selector(tapped(_:))
         b.onRightClick = { [weak self] in self?.onRightClick?(a) }
@@ -171,15 +194,22 @@ final class SidebarView: NSView {
         }
         buttons.removeAll()
         let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        // Uygulama yolunda KARSILIGI OLMAYANLARI gostermiyoruz: tus
+        // haritalama ve makrolar scrcpy denetim kanalinin olay bicimine
+        // bagli, orada calismiyor. Calismayan dugme gostermek, dugmeyi
+        // hic gostermemekten kotu.
+        let list = appMode
+            ? visibleActions.filter { $0 != .joystick && $0 != .macro }
+            : visibleActions
 
-        for a in SidebarView.topPinnedVisible(visibleActions) {
+        for a in SidebarView.topPinnedVisible(list) {
             topStack.addArrangedSubview(makeButton(a, cfg))
         }
-        for a in SidebarView.bottomPinnedVisible(visibleActions) {
+        for a in SidebarView.bottomPinnedVisible(list) {
             bottomStack.addArrangedSubview(makeButton(a, cfg))
         }
-        for a in visibleActions where !SidebarAction.topPinned.contains(a)
-                                   && !SidebarAction.bottomPinned.contains(a) {
+        for a in list where !SidebarAction.topPinned.contains(a)
+                         && !SidebarAction.bottomPinned.contains(a) {
             stack.addArrangedSubview(makeButton(a, cfg))
         }
         refreshStates()

@@ -17,6 +17,8 @@ final class MetalView: NSView {
     var onKey: ((UInt32, Bool) -> Void)?
     /// Ham macOS tus kodu. true donerse olay tuketildi (tus haritalama).
     var onRawKey: ((UInt16, Bool) -> Bool)?
+    /// Yazilan METIN — yalniz uygulama yolunda kullaniliyor.
+    var onCharacters: ((String) -> Void)?
 
     /// Akisin piksel boyutu (orn. 1600x720)
     var videoSize = CGSize(width: 1, height: 1) {
@@ -175,7 +177,12 @@ final class MetalView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if onRawKey?(event.keyCode, true) == true { return }
-        if let k = MetalView.androidKeycode(for: event.keyCode) { onKey?(k, true) }
+        if let k = MetalView.androidKeycode(for: event.keyCode) { onKey?(k, true); return }
+        // Eslenmemis tuslar YAZI olabilir. adb yolunda kullanilmiyor
+        // (orada tus kodu enjekte ediliyor); uygulama yolunda tek yazma
+        // yolu bu.
+        if let t = event.characters, !t.isEmpty,
+           t.rangeOfCharacter(from: .controlCharacters) == nil { onCharacters?(t) }
     }
     override func keyUp(with event: NSEvent) {
         if onRawKey?(event.keyCode, false) == true { return }

@@ -79,6 +79,7 @@ class AndrOSService : Service() {
         camera = cl
         // Ekran yansitma: adb'siz yol (MediaProjection + erisilebilirlik).
         val sl = ScreenLink(this, identity)
+        sl.onNeedProjection = { askForProjection() }
         sl.start()
         screen = sl
 
@@ -141,6 +142,14 @@ class AndrOSService : Service() {
                         audio?.setProjection(p)
                         screen?.setProjection(p)
                         capturingAudio = true
+                        // Bir dahaki acilista kendiliginden istensin:
+                        // Android izni OTURUMLUK veriyor ve kalici
+                        // yapmanin yolu yok, ama SORMAYI otomatiklestirmek
+                        // kullaniciyi ayarlarda gezdirmekten iyi.
+                        getSharedPreferences("andros", MODE_PRIVATE).edit()
+                            .putBoolean("captureWanted", true).apply()
+                        androidx.core.app.NotificationManagerCompat.from(this)
+                            .cancel(NOTIF_CAPTURE)
                     }.onFailure { android.util.Log.w("AndrOS", "yakalama: ${it.message}") }
                 }
                 notify(buildNotification())
@@ -231,6 +240,32 @@ class AndrOSService : Service() {
             .notify(NOTIF_ID, n)
     }
 
+    /**
+     * Ekran izni yok: kullaniciya TEK DOKUNUSLUK bir bildirim.
+     *
+     * Arka plandaki hizmet dogrudan etkinlik acamiyor (Android 10+),
+     * bu yuzden bildirim uzerinden gidiyoruz. Bildirime dokununca
+     * uygulama acilip onay ekranini kendisi cikariyor.
+     */
+    private fun askForProjection() {
+        val i = Intent(this, MainActivity::class.java)
+            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra("requestCapture", true)
+        val pi = PendingIntent.getActivity(this, 7, i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Mac ekranını istiyor")
+            .setContentText("Ekran paylaşımını başlatmak için dokun.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this).notify(NOTIF_CAPTURE, n)
+        }
+    }
+
     companion object {
         const val ACTION_DISCONNECT = "dev.naer.andros.DISCONNECT"
         const val ACTION_UNPAIR = "dev.naer.andros.UNPAIR"
@@ -259,6 +294,7 @@ class AndrOSService : Service() {
         private const val CHANNEL = "andros.connection"
         private const val CHANNEL_QUIET = "andros.connection.quiet"
         private const val NOTIF_ID = 1
+        private const val NOTIF_CAPTURE = 2
         @Volatile var running = false
             private set
 

@@ -134,6 +134,12 @@ public final class ScreenBridge {
     public func screenshot()    { input(["t": "shot"]) }
     public func volume(up: Bool) { input(["t": "vol", "d": up ? 1 : -1]) }
     public func toggleAutoRotate() { input(["t": "rotate"]) }
+    /// Telefon ekranini karart / geri ac.
+    ///
+    /// Ekrani GERCEKTEN kapatmak adb istiyor (scrcpy bunu `--turn-screen-off`
+    /// ile yapiyor ve orada shell yetkisi var). Adb'siz yapabildigimiz
+    /// parlakligi sifirlamak: yansitma surer, telefon kararir.
+    public func dimScreen(_ on: Bool) { input(["t": "dim", "on": on]) }
     public func type(_ s: String) { input(["t": "text", "s": s]) }
     public func backspace() { input(["t": "backspace"]) }
 

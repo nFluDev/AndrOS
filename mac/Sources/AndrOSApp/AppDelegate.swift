@@ -959,7 +959,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     // MARK: - Yansitma: UYGULAMA yolu (hata ayiklamasiz)
 
-    private var appMirror: AppMirrorWindowController?
+    /// Uygulama yolu ETKIN mi? Ayni pencere iki kaynaktan beslenebiliyor:
+    /// adb (scrcpy sunucusu) ya da telefondaki uygulama. Girdi, yan panel
+    /// ve boyutlandirma buna gore dallaniyor.
+    private var mirrorViaApp = false
+    private let appDriver = AppMirrorDriver()
+    private let gesturizer = TouchGesturizer()
 
     /// Telefondaki uygulama uzerinden yansitma.
     ///
@@ -972,71 +977,121 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             Log.write("yansıtma: uygulama bağlantısı yok")
             return
         }
-        let wc = appMirror ?? AppMirrorWindowController()
-        appMirror = wc
         let bridge = ScreenBridge.shared
+        mirrorViaApp = true
+        mirrorEmbedded = false
+        ensureWindow()
+        guard let v = view else { return }
+        appDriver.attach(to: v)
+        appDriver.params = session.params      // goruntu kaydiraclari ORTAK
+        content?.sidebar.appMode = true
+        appDriver.onSize = { [weak self] w, h in self?.resizeWindow(w, h) }
 
-        wc.mirror.onTap       = { bridge.tap($0, $1) }
-        wc.mirror.onLongPress = { bridge.longPress($0, $1) }
-        wc.mirror.onSwipe     = { bridge.swipe($0, ms: $1) }
-        wc.mirror.onBack      = { bridge.back() }
-        wc.mirror.onText      = { bridge.type($0) }
-        wc.mirror.onBackspace = { bridge.backspace() }
-        wc.onAction = { a in
-            switch a {
-            case .back:       bridge.back()
-            case .home:       bridge.home()
-            case .recents:    bridge.recents()
-            case .shade:      bridge.shade()
-            case .quick:      bridge.quickSettings()
-            case .screenshot: bridge.screenshot()
-            case .volumeUp:   bridge.volume(up: true)
-            case .volumeDown: bridge.volume(up: false)
-            case .rotate:     bridge.toggleAutoRotate()
-            case .lock:       bridge.lockScreen()
-            case .power:      bridge.powerDialog()
-            }
+        gesturizer.onTap       = { bridge.tap($0, $1) }
+        gesturizer.onLongPress = { bridge.longPress($0, $1) }
+        gesturizer.onSwipe     = { bridge.swipe($0, ms: $1) }
+
+        bridge.onFrame = { [weak self] px in self?.appDriver.push(px) }
+        bridge.onInputReady = { [weak self] ok in
+            guard let self else { return }
+            if ok { self.mirrorNotice = ""; self.content?.status.hide() }
+            else { self.showMirrorNotice(L("Dokunma çalışmıyor: telefonda "
+                                         + "Ayarlar › Erişilebilirlik › AndrOS'u aç.",
+                                           "Touch is off: on the phone open "
+                                         + "Settings › Accessibility › AndrOS.")) }
         }
-        wc.onClose   = { [weak self] in self?.stopAppMirroring() }
-
-        bridge.onFrame = { [weak wc] px in wc?.mirror.show(px) }
-        bridge.onInputReady = { [weak wc] ok in wc?.setInputReady(ok) }
-        bridge.onNotice = { [weak wc] code in
-            let text: String
-            switch code {
-            case "nowritesettings":
-                text = L("Otomatik döndürmeyi değiştirmek için telefonda AndrOS'a "
-                       + "“sistem ayarlarını değiştir” izni ver.",
-                         "To toggle auto-rotate, grant AndrOS the “modify system "
-                       + "settings” permission on the phone.")
-            default: text = code
-            }
-            wc?.notice(text)
+        bridge.onNotice = { [weak self] code in
+            self?.showMirrorNotice(self?.mirrorNoticeText(code) ?? code)
         }
         bridge.onState = { [weak self] st in
             guard let self else { return }
-            self.appMirror?.setInputReady(ScreenBridge.shared.inputReady)
             self.main?.setMirroring(st == .on)
-            if case .failed(let why) = st { self.explainMirrorFailure(why) }
+            switch st {
+            case .connecting:
+                self.content?.status.show(
+                    title: L("Bağlanılıyor…", "Connecting…"),
+                    detail: L("Telefondaki AndrOS uygulamasına.",
+                              "To the AndrOS app on the phone."),
+                    symbol: "iphone.gen3.radiowaves.left.and.right", busy: true)
+            case .on:
+                self.appReconnects = 0
+                self.mirrorNotice = ""
+                self.content?.status.hide()
+            case .failed(let why): self.explainMirrorFailure(why)
+            case .off:             self.appMirrorDropped()
+            }
         }
-        // Kalite: yansitma panelindeki ayarlar. Cozunurlugu de
-        // buradan veriyoruz — gecikmeyi en cok o belirliyor.
         let q = ScreenBridge.Quality(
             maxSize: UserDefaults.standard.object(forKey: "mirrorMaxSize") as? Int ?? 1920,
             fps: maxFPS,
             mbps: max(1, bitRate / 1_000_000))
+        appMirrorTarget = (host, token, q)
         bridge.start(host: host, token: token, quality: q)
-        wc.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showWindowNow()
         main?.setMirroring(true)
     }
 
+    /// Yeniden baglanmak icin gereken her sey.
+    private var appMirrorTarget: (host: String, token: String,
+                                  quality: ScreenBridge.Quality)?
+    private var appReconnects = 0
+
+    /// Baglanti KOPTU. Kullanicinin pencereyi kapatip yeniden acmasi
+    /// gerekmemeli: Wi-Fi bir an dalgalandiginda yayin kendiliginden
+    /// geri gelsin.
+    private func appMirrorDropped() {
+        guard mirrorViaApp, window?.isVisible == true,
+              let t = appMirrorTarget, appReconnects < 20 else { return }
+        appReconnects += 1
+        showMirrorNotice(L("Bağlantı koptu — yeniden bağlanılıyor…",
+                           "Connection dropped — reconnecting…"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.mirrorViaApp, self.window?.isVisible == true else { return }
+            Log.write("yansıtma: yeniden bağlanma denemesi \(self.appReconnects)")
+            ScreenBridge.shared.start(host: t.host, token: t.token, quality: t.quality)
+        }
+    }
+
+    /// Ayna penceresinin ustunde kisa uyari.
+    private var mirrorNotice = ""
+    private func showMirrorNotice(_ text: String, symbol: String = "exclamationmark.triangle") {
+        guard let c = content else { return }
+        mirrorNotice = text
+        c.status.show(title: text, detail: "", symbol: symbol, busy: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self, self.mirrorNotice == text else { return }
+            self.content?.status.hide()
+        }
+    }
+
+    private func mirrorNoticeText(_ code: String) -> String {
+        switch code {
+        case "nowritesettings":
+            return L("Otomatik döndürmeyi değiştirmek için telefonda AndrOS'a "
+                   + "“sistem ayarlarını değiştir” izni ver.",
+                     "To toggle auto-rotate, grant AndrOS the “modify system "
+                   + "settings” permission on the phone.")
+        case "locked":
+            return L("Telefon kilitli. Kilit ekranı Android'in güvenlik kuralı "
+                   + "gereği yakalanamıyor — şifreyi telefondan gir.",
+                     "The phone is locked. Android does not allow capturing the "
+                   + "lock screen — enter the passcode on the phone.")
+        default: return code
+        }
+    }
+
     private func stopAppMirroring() {
-        guard appMirror != nil else { return }
+        guard mirrorViaApp else { return }
+        // Karartmayi GERI AL: yayin bitince telefon karanlik kalirsa
+        // kullanici parlakligi elle duzeltmek zorunda kaliyor.
+        if appDim { ScreenBridge.shared.dimScreen(false); appDim = false }
+        mirrorViaApp = false
+        content?.sidebar.appMode = false
+        appMirrorTarget = nil
+        appReconnects = 0
         ScreenBridge.shared.stop()
-        appMirror?.onClose = nil
-        appMirror?.close()
-        appMirror = nil
+        appDriver.stop()
+        window?.orderOut(nil)
         main?.setMirroring(false)
     }
 
@@ -1047,12 +1102,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         switch why {
         case "noprojection":
             a.informativeText = L(
-                "Telefon ekran kaydı iznini vermemiş. Telefonda AndrOS uygulamasını "
-              + "aç ve çıkan \"Kaydetmeye başla\" onayını ver — aynı izin ses için de "
-              + "kullanılıyor, bir kez yeterli.",
-                "The phone has not granted screen capture. Open the AndrOS app on the "
-              + "phone and accept the \"Start recording\" prompt — the same permission "
-              + "covers audio, so once is enough.")
+                "Telefona bir bildirim gönderildi: “Mac ekranını istiyor”. Ona dokun "
+              + "ve çıkan onayı ver, sonra yansıtmayı yeniden başlat. Aynı izin ses "
+              + "için de kullanılıyor.\n\nAndroid bu izni oturumluk veriyor ve kalıcı "
+              + "yapmanın yolu yok; uygulamayı bir daha açtığında onayı kendisi soruyor.",
+                "A notification was sent to the phone: “The Mac wants your screen”. "
+              + "Tap it, accept the prompt, then start mirroring again. The same "
+              + "permission also covers audio.\n\nAndroid grants this per session and "
+              + "there is no way to make it permanent; the app asks for it by itself "
+              + "next time you open it.")
         default:
             a.informativeText = why
         }
@@ -1724,7 +1782,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     // MARK: - Yan panel
 
+    /// Yayindaki goruntunun olcusu — kaynak hangisiyse ondan.
+    /// Pencere boyutlandirma iki yolda da ayni kodu kullansin diye.
+    private var streamW: Int { mirrorViaApp ? appDriver.streamWidth : session.streamWidth }
+    private var streamH: Int { mirrorViaApp ? appDriver.streamHeight : session.streamHeight }
+
     private func handleSidebar(_ a: SidebarAction) {
+        // UYGULAMA yolu: olaylar scrcpy denetim kanalindan degil
+        // erisilebilirlik hizmetinden geciyor, bir kismi da farkli
+        // calismak zorunda (bkz. `appSidebar`).
+        if mirrorViaApp, appSidebar(a) { return }
         switch a {
         case .back:          session.tapKey(AKeycode.back)
         case .home:          session.tapKey(AKeycode.home)
@@ -1759,6 +1826,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
+    /// Uygulama yolunda yan panel eylemleri.
+    ///
+    /// `true` donerse eylem BURADA islendi. Ucu adb'li yoldan farkli
+    /// calisiyor ve nedenini yazmak gerekiyor:
+    ///  • EKRAN: telefonun ekranini gercekten kapatmak adb istiyor.
+    ///    Yapabildigimiz parlakligi sifirlamak — yansitma surer, telefon
+    ///    kararir. Kilit ekrani ise Android'in guvenlik kurali geregi
+    ///    hic yakalanamiyor, o yuzden "kilitle" ARTIK BURADA YOK.
+    ///  • EKRAN GORUNTUSU: telefondan istemek yerine ZATEN elimizdeki
+    ///    kareyi panoya koyuyoruz — aninda ve dosya birakmadan.
+    ///  • KAPAT: telefonu degil YANSITMAYI kapatir.
+    private func appSidebar(_ a: SidebarAction) -> Bool {
+        let b = ScreenBridge.shared
+        switch a {
+        case .back:          b.back()
+        case .home:          b.home()
+        case .recents:       b.recents()
+        case .notifications: b.shade()
+        case .volumeUp:      b.volume(up: true)
+        case .volumeDown:    b.volume(up: false)
+        case .rotate:        b.toggleAutoRotate()
+        case .power:         b.quickSettings()
+        case .screenOff:
+            // AYRI bir bayrak: adb yolundaki "screenOff" tercihi yayin
+            // baslarken telefonun ekranini KAPATMAYI anlatiyor ve
+            // varsayilani acik. Uygulama yolunda ekran kapanmiyor
+            // (karartiliyor) ve varsayilani kapali olmali, yoksa dugme
+            // ilk basista tersine calisiyordu.
+            appDim.toggle()
+            b.dimScreen(appDim)
+            refreshToggles()
+            showMirrorNotice(appDim
+                ? L("Telefon ekranı karartıldı — yansıtma sürüyor.",
+                    "The phone screen is dimmed — mirroring continues.")
+                : L("Telefon ekranı geri açıldı.", "The phone screen is back on."),
+                symbol: appDim ? "moon.fill" : "sun.max.fill")
+        case .screenshot:
+            copyMirrorFrame()
+        case .disconnect:
+            stopAppMirroring()
+        default:
+            return false        // ortak olanlar (tam ekran, panel tarafi, ayarlar…)
+        }
+        return true
+    }
+
+    /// Ekrandaki kareyi PANOYA kopyalar.
+    ///
+    /// Telefondan ekran goruntusu istemek dosya birakiyor ve geri
+    /// getirmesi gerekiyordu; kare zaten Mac'te.
+    private func copyMirrorFrame() {
+        guard let img = appDriver.snapshot() else {
+            showMirrorNotice(L("Kopyalanacak kare yok.", "No frame to copy."))
+            return
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects([img])
+        showMirrorNotice(L("Ekran görüntüsü panoya kopyalandı.",
+                           "Screenshot copied to the clipboard."),
+                         symbol: "doc.on.clipboard")
+    }
+
     /// Kenarliksiz pencerede AppKit'in toggleFullScreen'i calismiyordu
     /// (.titled olmayan pencere fullscreen'e girmiyor). Elle buyutuyoruz:
     /// onceki cerceveyi saklayip ekrani tamamen kaplayacak sekilde ayarliyoruz.
@@ -1783,8 +1913,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             // boyuta getir. Ekrani siyahla kaplamiyoruz; pencere tam
             // goruntunun sekli oluyor, dolayisiyla siyah kenarlik olusmuyor.
             // Yan panel de yerinde kaliyor, genisligi hesaba katiliyor.
-            let vw = CGFloat(max(session.streamWidth, 1))
-            let vh = CGFloat(max(session.streamHeight, 1))
+            let vw = CGFloat(max(streamW, 1))
+            let vh = CGFloat(max(streamH, 1))
             let bar = content?.sidebarWidth ?? 0
             let avail = scr.visibleFrame
             let scale = Swift.min((avail.width - bar) / vw, avail.height / vh)
@@ -1972,10 +2102,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
 
+    /// Uygulama yolunda telefon ekrani KARARTILMIS mi?
+    private var appDim = false
+
     private func refreshToggles() {
         content?.sidebar.toggleStates = [
             .joystick: session.keyMapper.enabled,
-            .screenOff: screenOff,
+            .screenOff: mirrorViaApp ? appDim : screenOff,
             .macro: macroEngine.state != .idle,
         ]
     }
@@ -2321,10 +2454,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         container.guide.isHidden = !showGuide
         content = container
 
-        v.onTouch  = { [weak self] a, x, y in self?.session.sendTouch(a, x: x, y: y) }
-        v.onScroll = { [weak self] x, y, h, vv in self?.session.sendScroll(x: x, y: y, h: h, v: vv) }
-        v.onCamera = { [weak self] a, x, y in self?.session.sendCamera(a, x: x, y: y) }
-        v.onKey    = { [weak self] k, down in self?.session.sendKey(k, down: down) }
+        // GIRDI IKI YOLA da gidebilir. adb yolunda olaylar dogrudan
+        // enjekte ediliyor; uygulama yolunda erisilebilirlik hizmeti
+        // "bas/birak" degil "sundan buraya sur" istiyor, o yuzden
+        // bas-surukle-birak dizisi jeste ceviriliyor.
+        v.onTouch  = { [weak self] a, x, y in
+            guard let self else { return }
+            guard self.mirrorViaApp else { self.session.sendTouch(a, x: x, y: y); return }
+            let w = Double(max(self.appDriver.streamWidth, 1))
+            let h = Double(max(self.appDriver.streamHeight, 1))
+            let nx = Double(x) / w, ny = Double(y) / h
+            switch a {
+            case .down: self.gesturizer.begin(nx, ny)
+            case .move: self.gesturizer.move(nx, ny)
+            default:    self.gesturizer.end(nx, ny)
+            }
+        }
+        v.onScroll = { [weak self] x, y, h, vv in
+            guard let self else { return }
+            guard self.mirrorViaApp else {
+                self.session.sendScroll(x: x, y: y, h: h, v: vv); return
+            }
+            let sw = Double(max(self.appDriver.streamWidth, 1))
+            let sh = Double(max(self.appDriver.streamHeight, 1))
+            let cx = Double(x) / sw, cy = Double(y) / sh
+            // Android'de asagi kaydirmak icin parmak YUKARI gider.
+            let to = max(0.02, min(0.98, cy + Double(vv) * 0.35))
+            guard abs(to - cy) > 0.005 else { return }
+            ScreenBridge.shared.swipe([(cx, cy), (cx, (cy + to) / 2), (cx, to)], ms: 90)
+        }
+        v.onCamera = { [weak self] a, x, y in
+            guard let self, !self.mirrorViaApp else { return }
+            self.session.sendCamera(a, x: x, y: y)
+        }
+        v.onKey    = { [weak self] k, down in
+            guard let self else { return }
+            guard self.mirrorViaApp else { self.session.sendKey(k, down: down); return }
+            guard down else { return }
+            switch k {
+            case AKeycode.back:      ScreenBridge.shared.back()
+            case AKeycode.home:      ScreenBridge.shared.home()
+            case AKeycode.appSwitch: ScreenBridge.shared.recents()
+            case AKeycode.del:       ScreenBridge.shared.backspace()
+            case AKeycode.enter:     ScreenBridge.shared.type("\n")
+            default: break
+            }
+        }
+        // Yazi: uygulama yolunda tus kodu degil KARAKTER gerekiyor —
+        // erisilebilirlik alanin icerigini degistirerek yaziyor ve tus
+        // kodu ile klavye duzeni arasindaki esleme yanlis harf uretirdi.
+        v.onCharacters = { [weak self] text in
+            guard let self, self.mirrorViaApp else { return }
+            ScreenBridge.shared.type(text)
+        }
         v.onRawKey = { [weak self] code, down in
             self?.session.keyMapper.handle(keyCode: code, isDown: down) ?? false
         }
@@ -2396,7 +2578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// oranina TAM oturacak sekilde hesapliyoruz. Boylece hicbir boyutta
     /// ust/alt siyah bar olusmuyor — pencere daima goruntunun sekli oluyor.
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        let vw = CGFloat(session.streamWidth), vh = CGFloat(session.streamHeight)
+        let vw = CGFloat(streamW), vh = CGFloat(streamH)
         guard vw > 0, vh > 0 else { return frameSize }
 
         let bar = content?.sidebarWidth ?? 0
@@ -2417,6 +2599,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func updateUI(_ s: MirrorSession.State) {
+        // UYGULAMA yolu etkinken adb oturumunun durumu pencereyi
+        // yonetmemeli: bosta olan oturum "bagli degil" deyip uyari
+        // katmanini siliyordu.
+        if mirrorViaApp { return }
         switch s {
         case .idle:
             statusMenuItem?.title = L("Bağlı değil", "Not connected")
@@ -2431,7 +2617,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                                  symbol: "cable.connector", busy: true)
             showWindowNow()
         case .running:
-            statusMenuItem?.title = L("Yayında — \(session.streamWidth)x\(session.streamHeight)", "Streaming — \(session.streamWidth)x\(session.streamHeight)")
+            statusMenuItem?.title = L("Yayında — \(streamW)x\(streamH)",
+                                      "Streaming — \(streamW)x\(streamH)")
             connectItem?.title = L("Bağlantıyı kes", "Disconnect")
             statusItem?.button?.contentTintColor = nil
             content?.status.hide()
@@ -2450,6 +2637,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     func windowWillClose(_ n: Notification) {
         Log.write("pencere kapaniyor -> oturum durduruluyor")
-        session.stop()
+        // Hangi kaynak yayin yapiyorsa O durdurulmali; uygulama yolunda
+        // `session` zaten bosta ve durdurmak bir sey yapmiyordu.
+        if mirrorViaApp { stopAppMirroring() } else { session.stop() }
     }
 }

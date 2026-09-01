@@ -48,6 +48,8 @@ class ScreenLink(
     @Volatile private var surface: Surface? = null
     @Volatile private var out: DataOutputStream? = null
     @Volatile private var running = false
+    /// Ekran izni yok: hizmet kullaniciya bildirim dussun.
+    var onNeedProjection: (() -> Unit)? = null
 
     private var width = 0
     private var height = 0
@@ -150,8 +152,17 @@ class ScreenLink(
     // MARK: - Goruntu
 
     private fun startCapture() {
-        if (running) return
-        val proj = projection ?: run { sendError("noprojection"); return }
+        // Zaten calisiyorsa YENIDEN KUR, sessizce cikma. Baglanti
+        // koptugunda eski yakalama bir sure daha ayakta kalabiliyor;
+        // erken donmek yeni istemciye hic kare gitmemesi demekti.
+        if (running) stopCapture()
+        val proj = projection ?: run {
+            sendError("noprojection")
+            // Kullanicinin uygulamayi acip izni aramasini beklemek yerine
+            // bildirim dusuruyoruz: tek dokunus, dogrudan onay ekrani.
+            onNeedProjection?.invoke()
+            return
+        }
         if (!InputService.isEnabled) {
             // Goruntu calisir ama kontrol calismaz — kullaniciya SOYLE.
             sendError("noinput")
@@ -218,8 +229,8 @@ class ScreenLink(
      * cozulen kareden anliyor, ek bir sey yapmasi gerekmiyor.
      */
     private fun watchRotation() {
-        if (displayListener != null) return
         val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        if (displayListener != null) { pollRotation(); return }
         val l = object : DisplayManager.DisplayListener {
             override fun onDisplayAdded(id: Int) {}
             override fun onDisplayRemoved(id: Int) {}
@@ -236,6 +247,44 @@ class ScreenLink(
         }
         dm.registerDisplayListener(l, android.os.Handler(android.os.Looper.getMainLooper()))
         displayListener = l
+        pollRotation()
+    }
+
+    private fun pollRotation() {
+        // DINLEYICI TEK BASINA YETMIYOR. Bir uygulama kendi yonunu
+        // dayattiginda (oyunlar) bazi cihazlarda `onDisplayChanged`
+        // gelmiyor ya da olcu daha oturmadan geliyor; goruntu eski
+        // cerceveye sikisip kaliyordu. Ucuz bir yoklama bunu kapatiyor:
+        // saniyede uc kez tek bir tamsayi okumak.
+        thread(isDaemon = true, name = "andros-rotation") {
+            while (running) {
+                Thread.sleep(300)
+                if (!running) break
+                // KILIT: kilit ekrani Android'in guvenlik kurali geregi
+                // yakalanamiyor, karsi taraf simsiyah bir ekran goruyor
+                // ve "bozuldu" saniyordu. Durumu SOYLUYORUZ.
+                val km = ctx.getSystemService(Context.KEYGUARD_SERVICE)
+                    as android.app.KeyguardManager
+                val locked = km.isKeyguardLocked
+                if (locked != wasLocked) {
+                    wasLocked = locked
+                    if (locked) sendError("locked")
+                }
+                val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                @Suppress("DEPRECATION")
+                val now = wm.defaultDisplay.rotation
+                if (now != rotation) {
+                    Log.i(TAG, "donus (yoklama): $rotation -> $now")
+                    // Olcunun oturmasini bekle: hemen okursak eski
+                    // genislik/yukseklik geliyor.
+                    Thread.sleep(150)
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        if (running) { stopCapture(); startCapture() }
+                    }
+                    break       // yeni yakalama kendi yoklamasini baslatir
+                }
+            }
+        }
     }
 
     private fun stopCapture() {
@@ -316,6 +365,7 @@ class ScreenLink(
             // gostergesini de aciyor.
             "vol"     -> volume(o.optInt("d", 1))
             "rotate"  -> toggleRotation()
+            "dim"     -> dim(o.optBoolean("on", true))
             "text"    -> svc.type(o.optString("s"))
             "backspace" -> svc.backspace()
         }
@@ -353,6 +403,42 @@ class ScreenLink(
                 if (now == 0) 1 else 0)
         }
     }
+
+    /**
+     * Telefon ekranini karart / geri ac.
+     *
+     * Ekrani GERCEKTEN kapatmak adb (ya da cihaz yoneticisi) istiyor;
+     * scrcpy'nin `--turn-screen-off`'u shell yetkisiyle calisiyor.
+     * Adb'siz yapabildigimiz parlakligi sifirlamak: yansitma surer,
+     * telefon kararir. Onceki parlakligi saklayip geri veriyoruz.
+     */
+    private fun dim(on: Boolean) {
+        if (!android.provider.Settings.System.canWrite(ctx)) { sendError("nowritesettings"); return }
+        runCatching {
+            val cr = ctx.contentResolver
+            if (on) {
+                if (savedBrightness < 0) {
+                    savedBrightness = android.provider.Settings.System.getInt(
+                        cr, android.provider.Settings.System.SCREEN_BRIGHTNESS, 128)
+                }
+                // Otomatik parlaklik acikken elle verilen deger hemen
+                // eziliyor; once onu kapatmak gerekiyor.
+                android.provider.Settings.System.putInt(
+                    cr, android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+                    android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+                android.provider.Settings.System.putInt(
+                    cr, android.provider.Settings.System.SCREEN_BRIGHTNESS, 0)
+            } else {
+                android.provider.Settings.System.putInt(
+                    cr, android.provider.Settings.System.SCREEN_BRIGHTNESS,
+                    if (savedBrightness > 0) savedBrightness else 128)
+                savedBrightness = -1
+            }
+        }
+    }
+
+    private var savedBrightness = -1
+    private var wasLocked = false
 
     private fun sendMeta() {
         val o = out ?: return

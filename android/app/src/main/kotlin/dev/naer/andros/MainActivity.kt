@@ -130,11 +130,36 @@ class MainActivity : AppCompatActivity() {
         requestCorePermissions()
         maybeCheckForUpdate()
         handlePairUri(intent?.data)
+        maybeRequestCapture(intent)
+    }
+
+    /**
+     * Ekran paylasimini SORMAYI otomatiklestirir.
+     *
+     * Android bu izni oturumluk veriyor ve kalici yapmanin yolu yok —
+     * sistem onay ekranini her seferinde gostermek zorunda. Yapabildigimiz,
+     * kullaniciyi ayarlarda gezdirmemek: daha once verdiyse ya da Mac
+     * istediyse onay ekranini biz aciyoruz.
+     */
+    private fun maybeRequestCapture(intent: Intent?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (AndrOSService.capturingAudio) return
+        val asked = intent?.getBooleanExtra("requestCapture", false) == true
+        val wanted = getSharedPreferences("andros", MODE_PRIVATE)
+            .getBoolean("captureWanted", false)
+        if (!asked && !wanted) return
+        val mgr = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+        // Kisa gecikme: etkinlik daha yerlesmeden onay ekrani acilirsa
+        // bazi cihazlarda sessizce dusuyor.
+        window.decorView.postDelayed({
+            runCatching { projectionRequest.launch(mgr.createScreenCaptureIntent()) }
+        }, 400)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        maybeRequestCapture(intent)
         handlePairUri(intent.data)
     }
 
