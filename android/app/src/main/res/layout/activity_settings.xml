@@ -65,19 +65,11 @@
         <!-- Guncelleme -->
         <TextView style="@style/SectionHead" android:text="@string/sec_network" />
 
-        <EditText
-            android:id="@+id/signalUrl"
+        <LinearLayout
+            android:id="@+id/networkBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@drawable/code_bg"
-            android:hint="wss://sunucu/ws"
-            android:imeOptions="actionDone"
-            android:inputType="textUri"
-            android:padding="12dp"
-            android:textColor="@color/text"
-            android:textColorHint="@color/text_dim"
-            android:textSize="13sp"
-            android:autofillHints="" />
+            android:orientation="vertical" />
 
         <TextView
             android:id="@+id/signalIdentity"

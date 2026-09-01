@@ -147,25 +147,63 @@ class SettingsActivity : Activity() {
 
     // MARK: - Sifirlama
 
-    /// AndrOS agi: sunucu adresi ve bu cihazin kimligi.
+    /**
+     * AndrOS agi.
+     *
+     * ADRES YAZDIRMIYORUZ: sunucu adresi son kullanicinin anlayacagi
+     * bir sey degil ve zaten kurulu geliyor. Burada yalnizca "acik mi"
+     * ve kimlik var; kendi sunucusunu kuran uzun basarak degistiriyor.
+     */
     private fun buildNetwork() {
-        val field = findViewById<android.widget.EditText>(R.id.signalUrl)
+        val box = findViewById<LinearLayout>(R.id.networkBox)
         val identity = findViewById<TextView>(R.id.signalIdentity)
+        box.removeAllViews()
         val prefs = getSharedPreferences("andros", MODE_PRIVATE)
-        field.setText(prefs.getString("signalUrl", "") ?: "")
-        identity.text = "Kimliğin: " + dev.naer.andros.call.Keys(this).id
-        field.setOnEditorActionListener { _, _, _ ->
-            val v = field.text.toString().trim()
-            // `wss://` disinda adres kabul etmiyoruz: sunucu icerigi
-            // goremese de kimin kime yazdigini aradaki herkes gorurdu.
-            if (v.isNotEmpty() && !v.startsWith("wss://")) {
-                toast("Adres wss:// ile başlamalı.")
-            } else {
-                prefs.edit().putString("signalUrl", v).apply()
-                toast(if (v.isEmpty()) "AndrOS ağı kapatıldı." else "Kaydedildi.")
-            }
-            true
+
+        toggleRow(box, "AndrOS ağı",
+            "Uçtan uca şifreli mesajlaşma ve arama. Sunucu içeriği göremez; "
+          + "yalnızca iki cihazı tanıştırır.",
+            prefs.getBoolean("signalEnabled", true)) { on ->
+            prefs.edit().putBoolean("signalEnabled", on).apply()
         }
+
+        val custom = prefs.getString("signalUrl", "") ?: ""
+        actionRow(box, "Sunucu",
+            if (custom.isEmpty()) "Kurulu sunucu kullanılıyor." else custom,
+            "Değiştir") { editServer(prefs) }
+
+        identity.text = "Kimliğin: " + dev.naer.andros.call.Keys(this).id
+    }
+
+    /// Kendi sunucusunu kuranlar icin.
+    private fun editServer(prefs: android.content.SharedPreferences) {
+        val field = android.widget.EditText(this).apply {
+            setText(prefs.getString("signalUrl", "") ?: "")
+            hint = dev.naer.andros.call.SignalClient.DEFAULT_URL
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(56, 24, 56, 8)
+            addView(field)
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Sinyal sunucusu")
+            .setMessage("Normalde dokunman gerekmez — kurulu bir sunucu var. "
+                      + "Kendi sunucunu kuruyorsan adresini buraya yaz. "
+                      + "Boş bırakırsan kurulu olana döner.")
+            .setView(box)
+            .setPositiveButton("Kaydet") { _, _ ->
+                val v = field.text.toString().trim()
+                if (v.isNotEmpty() && !v.startsWith("wss://")) {
+                    toast("Adres wss:// ile başlamalı.")
+                } else {
+                    prefs.edit().putString("signalUrl", v).apply()
+                    buildNetwork()
+                }
+            }
+            .setNegativeButton("Vazgeç", null)
+            .show()
     }
 
     private fun buildReset() {

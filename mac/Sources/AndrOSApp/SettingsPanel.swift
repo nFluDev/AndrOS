@@ -60,30 +60,48 @@ final class SettingsPanel: NSViewController {
         ])
 
         // --- AndrOS agi
-        signalField.stringValue = SignalHub.serverURL
-        signalField.placeholderString = "wss://sunucu/ws"
-        signalField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        signalField.target = self
-        signalField.action = #selector(signalURLChanged)
+        //
+        // ADRES YAZDIRMIYORUZ. Sunucu adresi son kullanicinin
+        // anlayacagi bir sey degil ve zaten kurulu geliyor; burada
+        // yalnizca "calisiyor mu" ve kimlik var. Kendi sunucusunu
+        // kurmak isteyen "Sunucu…" dugmesinden degistiriyor.
+        let signalToggle = toggle(
+            L("AndrOS ağı", "AndrOS network"),
+            L("Uçtan uca şifreli mesajlaşma ve arama. Sunucu içeriği göremez; "
+            + "yalnızca iki cihazı tanıştırır.",
+              "End-to-end encrypted messaging and calls. The server cannot read "
+            + "content; it only introduces two devices."),
+            key: "signalEnabled", default: true) { on in
+            if on { SignalHub.shared.start() } else { SignalHub.shared.stop() }
+        }
+
+        signalStatus.font = .systemFont(ofSize: 11)
+        signalStatus.textColor = .secondaryLabelColor
         signalIdentity.stringValue = L("Kimliğin: \(SignalHub.shared.id)",
                                        "Your identity: \(SignalHub.shared.id)")
         signalIdentity.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         signalIdentity.textColor = .tertiaryLabelColor
-        let signalNote = NSTextField(labelWithString:
-            L("Uçtan uca şifreli mesaj ve arama için kendi sunucun. Sunucu içeriği "
-            + "göremez; yalnızca iki cihazı tanıştırır. Boş bırakırsan ağ kapalı kalır.",
-              "Your own server for end-to-end encrypted messages and calls. It cannot "
-            + "read content; it only introduces two devices. Leave empty to keep the "
-            + "network off."))
-        signalNote.font = .systemFont(ofSize: 10)
-        signalNote.textColor = .secondaryLabelColor
-        signalNote.maximumNumberOfLines = 3
-        signalNote.preferredMaxLayoutWidth = 420
+        signalIdentity.toolTip = L("Bu cihazın ağdaki adı. Karşı tarafla "
+                                 + "karşılaştırırsan araya kimsenin girmediğinden "
+                                 + "emin olursun.",
+                                   "This device's name on the network. Comparing it "
+                                 + "with the other side proves nobody is in between.")
+        let serverButton = NSButton(title: L("Sunucu…", "Server…"), target: self,
+                                    action: #selector(editSignalServer))
+        serverButton.bezelStyle = .rounded
+        serverButton.controlSize = .small
+        serverButton.toolTip = L("Kendi sunucunu kullanmak için.",
+                                 "To use your own server.")
+
+        let signalRow = NSStackView(views: [signalStatus, serverButton])
+        signalRow.orientation = .horizontal
+        signalRow.spacing = 8
         let signalStack = NSStackView(views: [head(L("ANDROS AĞI", "ANDROS NETWORK")),
-                                              signalField, signalIdentity, signalNote])
+                                              signalToggle, signalRow, signalIdentity])
         signalStack.orientation = .vertical
         signalStack.alignment = .leading
         signalStack.spacing = 6
+        refreshSignalStatus()
 
         // --- Menu cubugu
         let menubar = section(L("MENÜ ÇUBUĞU", "MENU BAR"), [
@@ -234,23 +252,60 @@ final class SettingsPanel: NSViewController {
 
     // MARK: - Eylemler
 
-    private let signalField = NSTextField()
     private let signalIdentity = NSTextField(labelWithString: "")
+    private let signalStatus = NSTextField(labelWithString: "")
 
-    /// Adres degisince agi yeniden kur — kullanicinin uygulamayi
-    /// kapatip acmasi gerekmesin.
-    @objc private func signalURLChanged() {
-        let v = signalField.stringValue.trimmingCharacters(in: .whitespaces)
+    /// Agin DURUMU sade bir cumleyle. Kullanicinin adrese bakmasi
+    /// gerekmiyor; sorusu "calisiyor mu".
+    private func refreshSignalStatus() {
+        guard SignalHub.enabled else {
+            signalStatus.stringValue = L("Kapalı.", "Off.")
+            signalStatus.textColor = .tertiaryLabelColor
+            return
+        }
+        switch SignalHub.shared.client?.state ?? .offline {
+        case .ready:
+            signalStatus.stringValue = L("Bağlı.", "Connected.")
+            signalStatus.textColor = .systemGreen
+        case .connecting:
+            signalStatus.stringValue = L("Bağlanılıyor…", "Connecting…")
+            signalStatus.textColor = .secondaryLabelColor
+        case .offline:
+            signalStatus.stringValue = L("Sunucuya ulaşılamıyor.",
+                                         "Cannot reach the server.")
+            signalStatus.textColor = .systemOrange
+        }
+    }
+
+    /// Kendi sunucusunu kuranlar icin. Ana ekranda DURMUYOR: adres son
+    /// kullanicinin anlayacagi bir sey degil.
+    @objc private func editSignalServer() {
+        let a = NSAlert()
+        a.messageText = L("Sinyal sunucusu", "Signal server")
+        a.informativeText = L(
+            "Normalde dokunman gerekmez — kurulu bir sunucu var. Kendi sunucunu "
+          + "kuruyorsan adresini buraya yaz. Boş bırakırsan kurulu olana döner.",
+            "You normally do not need this — a server is already set. If you run "
+          + "your own, put its address here. Empty restores the default.")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 22))
+        field.stringValue = SignalHub.serverURL == SignalHub.defaultURL
+            ? "" : SignalHub.serverURL
+        field.placeholderString = SignalHub.defaultURL
+        field.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        a.accessoryView = field
+        a.addButton(withTitle: L("Kaydet", "Save"))
+        a.addButton(withTitle: L("Vazgeç", "Cancel"))
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+
+        let v = field.stringValue.trimmingCharacters(in: .whitespaces)
         guard v.isEmpty || SignalClient.isAllowed(v) else {
             statusLine.stringValue = L("Adres wss:// ile başlamalı.",
                                        "The address must start with wss://")
             return
         }
         SignalHub.serverURL = v
-        statusLine.stringValue = v.isEmpty
-            ? L("AndrOS ağı kapatıldı.", "AndrOS network turned off.")
-            : L("Bağlanılıyor…", "Connecting…")
-        if v.isEmpty { SignalHub.shared.stop() } else { SignalHub.shared.start() }
+        SignalHub.shared.start()
+        refreshSignalStatus()
     }
 
     /// Erisilebilirlik izninin GERCEK durumu ve bozulduysa onarim.

@@ -13,10 +13,29 @@ public final class SignalHub {
     public private(set) var client: SignalClient?
     public var id: String { keys.id }
 
-    /// Sunucu adresi. Bos ise ag kapali — hicbir sey denenmiyor.
+    /// Kurulu sunucu. Kullaniciya adres YAZDIRMIYORUZ: bu bir uygulama
+    /// ayari degil, altyapi. Elle degistirmek yalnizca kendi sunucusunu
+    /// kuranlar icin, ayarlarda geri planda duruyor.
+    public static let defaultURL = "wss://endpoint.gamehost.dev/andros.signal/ws"
+
+    /// Kullanilacak adres: kullanici baskasini yazmadiysa kurulu olan.
     public static var serverURL: String {
-        get { UserDefaults.standard.string(forKey: "signalURL") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "signalURL") }
+        get {
+            let custom = UserDefaults.standard.string(forKey: "signalURL") ?? ""
+            return custom.isEmpty ? defaultURL : custom
+        }
+        set {
+            // Varsayilanla ayni ise HIC saklamiyoruz: sunucu adresi
+            // ileride degisirse eski deger takili kalmasin.
+            UserDefaults.standard.set(newValue == defaultURL ? "" : newValue,
+                                      forKey: "signalURL")
+        }
+    }
+
+    /// Ag kapali mi? Kullanici bilerek kapatabiliyor.
+    public static var enabled: Bool {
+        get { UserDefaults.standard.object(forKey: "signalEnabled") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "signalEnabled") }
     }
 
     public var onState: ((SignalClient.State) -> Void)?
@@ -69,8 +88,9 @@ public final class SignalHub {
     // MARK: - Baglanti
 
     public func start() {
+        guard Self.enabled else { Log.write("sinyal: ağ kapalı"); return }
         let url = Self.serverURL
-        guard !url.isEmpty else { Log.write("sinyal: sunucu adresi ayarlı değil"); return }
+        guard !url.isEmpty else { return }
         loadPeers()
         client?.disconnect()
         guard let c = SignalClient(keys: keys, url: url) else { return }

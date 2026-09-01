@@ -1,5 +1,6 @@
 package dev.naer.andros.call
 
+import android.content.Context
 import android.util.Base64
 import android.util.Log
 import okhttp3.OkHttpClient
@@ -188,6 +189,17 @@ class SignalClient(
 
     companion object {
         private const val TAG = "AndrOS.Signal"
+
+        /// Kurulu sunucu. Kullaniciya adres YAZDIRMIYORUZ: bu bir
+        /// uygulama ayari degil, altyapi.
+        const val DEFAULT_URL = "wss://endpoint.gamehost.dev/andros.signal/ws"
+
+        /// Kullanilacak adres: kullanici baskasini yazmadiysa kurulu olan.
+        fun urlFor(ctx: Context): String {
+            val custom = ctx.getSharedPreferences("andros", Context.MODE_PRIVATE)
+                .getString("signalUrl", "") ?: ""
+            return if (custom.isEmpty()) DEFAULT_URL else custom
+        }
 
         /**
          * Numarayi E.164'e yaklastirir.

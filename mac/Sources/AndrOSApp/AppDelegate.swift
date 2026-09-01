@@ -255,6 +255,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         startCompanionWatch()
 
+        // AndrOS agi acilista kuruluyor: gelen mesaj ve arama
+        // uygulamayi acmayi beklemesin.
+        SignalHub.shared.onMessage = { [weak self] from, text, at in
+            self?.handleNetworkMessage(from: from, text: text, at: at)
+        }
+        SignalHub.shared.start()
+
         // AndrOS artik bir KABUK: acilista hub gosteriliyor, aynalama
         // oradan bir modul olarak baslatiliyor.
         showHub()
@@ -718,6 +725,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             break
         }
         NotificationCenter.default.post(name: .androsNotificationsChanged, object: nil)
+    }
+
+    /// AndrOS agindan metin mesaji geldi.
+    ///
+    /// Su an bildirimle gosteriliyor; sohbet ekrani gelince oraya da
+    /// dusecek. Bildirim SMS'ten ayirt edilebilir olmali — ikisi ayni
+    /// yerden gelmiyor.
+    private func handleNetworkMessage(from: String, text: String, at: Date) {
+        Log.write("AndrOS mesajı [\(from)]: \(text.prefix(40))")
+        Notify.post(title: L("AndrOS mesajı", "AndrOS message"),
+                    body: text, id: "andros.msg.\(from).\(Int(at.timeIntervalSince1970))")
     }
 
     /// Erisilebilirlik izni yoksa BIR KEZ sor.
