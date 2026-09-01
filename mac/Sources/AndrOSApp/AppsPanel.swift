@@ -370,7 +370,7 @@ final class AppsPanel: NSViewController, AndrOSPanel,
             // .../Android/obb/<paket>/<dosya>.obb yapisini koru
             let pkg = obb.deletingLastPathComponent().lastPathComponent
             let dest = "/sdcard/Android/obb/" + pkg
-            _ = try? d.adb.run(["shell", "mkdir", "-p", "\"\(dest)\""])
+            _ = d.mkdirPreferringApp(dest)
             _ = d.push(obb.path, to: dest)
         }
         return true

@@ -456,6 +456,50 @@ public final class CompanionLink {
         }
     }
 
+    /// Mac'ten telefona dosya yollar — adb OLMADAN.
+    ///
+    /// `files.read`in tersi: once istegi yolluyoruz, sonra 256 KB'lik
+    /// bloklar, en sonda bos blok. Telefon bloklari ayni soketten
+    /// okuyor; bu yuzden gonderim SIRALI olmali (`uploadGate`).
+    public func uploadFileSync(local: String, to remote: String) -> Bool {
+        guard state == .ready,
+              let data = FileManager.default.contents(atPath: local) else { return false }
+        return Self.uploadGate.sync {
+            let sem = DispatchSemaphore(value: 0)
+            var ok = false
+            let id = request("files.write", ["path": remote, "size": data.count]) { d, err in
+                ok = (err == nil) && (d != nil)
+                sem.signal()
+            }
+            // Bloklari HEMEN ardindan yolluyoruz: telefon istegi
+            // gorur gormez okumaya basliyor.
+            let chunk = 256 * 1024
+            var offset = 0
+            while offset < data.count {
+                let end = min(offset + chunk, data.count)
+                sendBlob(id: id, payload: data.subdata(in: offset..<end))
+                offset = end
+            }
+            sendBlob(id: id, payload: Data())        // bitti
+            _ = sem.wait(timeout: .now() + 600)
+            return ok
+        }
+    }
+
+    private static let uploadGate = DispatchQueue(label: "dev.naer.andros.upload")
+
+    /// Ikili cerceve: [4 bayt uzunluk][1 bayt tur=1][4 bayt istek][govde]
+    private func sendBlob(id: Int, payload: Data) {
+        var frame = Data()
+        var len = UInt32(payload.count + 5).bigEndian
+        withUnsafeBytes(of: &len) { frame.append(contentsOf: $0) }
+        frame.append(1)
+        var rid = UInt32(id).bigEndian
+        withUnsafeBytes(of: &rid) { frame.append(contentsOf: $0) }
+        frame.append(payload)
+        conn?.send(content: frame, completion: .contentProcessed { _ in })
+    }
+
     /// Cihazdan `bytes` kadar veri cekip MB/s olcer.
     ///
     /// Gercek yuk uzerinden olcum: kuramsal hiz yerine bu baglantida

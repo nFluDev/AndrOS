@@ -46,10 +46,22 @@ public final class CompanionBridge {
 public extension AndroidData {
 
     /// Kisiler.
+    /// Son basarisizligin sebebi (izin yok, baglanti yok…). Paneller
+    /// bos liste yerine NE OLDUGUNU gosterebilsin diye.
+    static var lastFailure: String?
+
     func contactsPreferringApp() -> [Contact] {
-        guard let b = companion, b.isReady else { return contacts() }
+        guard let b = companion, b.isReady else {
+            Self.lastFailure = "notconnected"
+            return contacts()
+        }
         let rows = b.array("contacts.list", "contacts", ["limit": 2000])
-        guard !rows.isEmpty else { return contacts() }
+        guard !rows.isEmpty else {
+            // `permission` hatasi eksik iznin ADINI da tasiyor.
+            Self.lastFailure = b.lastError ?? "empty"
+            return contacts()
+        }
+        Self.lastFailure = nil
         var seen = Set<String>()
         return rows.compactMap { r in
             guard let name = r["name"] as? String, let num = r["number"] as? String
@@ -217,18 +229,44 @@ public extension AndroidData {
 
     func pullPreferringApp(_ remote: String, to local: String,
                            progress: ((Int, Int) -> Void)? = nil) -> Bool {
-        guard let b = companion, b.isReady else { return pull(remote, to: local) }
-        return Self.pullGate.sync {
-            let sem = DispatchSemaphore(value: 0)
-            var ok = false
-            b.link.downloadFile(path: remote, to: local, progress: progress) { r in
-                ok = r; sem.signal()
+        pull(remote, to: local, progress: progress)
+    }
+
+    /// Dosyayi indir. ONCE UYGULAMA, sonra adb.
+    ///
+    /// Butun cagri yerleri (surukle birak, resim acma, kopyalama, APK
+    /// cikarma, muzik) bunu kullaniyor. Eskiden hepsi dogrudan adb
+    /// cagiriyordu ve hata ayiklama kapaliyken sessizce basarisiz
+    /// oluyordu.
+    @discardableResult
+    func pull(_ remote: String, to local: String,
+              progress: ((Int, Int) -> Void)? = nil) -> Bool {
+        if let b = companion, b.isReady {
+            let ok = Self.pullGate.sync { () -> Bool in
+                let sem = DispatchSemaphore(value: 0)
+                var done = false
+                b.link.downloadFile(path: remote, to: local, progress: progress) { r in
+                    done = r; sem.signal()
+                }
+                _ = sem.wait(timeout: .now() + 600)
+                return done
             }
-            _ = sem.wait(timeout: .now() + 600)
-            // Uygulama yolu basarisizsa adb'yi DENE: bazi dosyalar
-            // paylasilan depolamanin disinda kalabiliyor.
-            return ok ? true : pull(remote, to: local)
+            if ok { return true }
         }
+        // Uygulama yolu yoksa ya da basarisizsa adb'yi dene.
+        return pullViaADB(remote, to: local)
+    }
+
+    /// Dosya yukle. ONCE UYGULAMA, sonra adb.
+    @discardableResult
+    func push(_ local: String, to remoteDir: String) -> Bool {
+        if let b = companion, b.isReady {
+            let name = (local as NSString).lastPathComponent
+            let target = remoteDir.hasSuffix("/") ? remoteDir + name
+                                                  : remoteDir + "/" + name
+            if b.link.uploadFileSync(local: local, to: target) { return true }
+        }
+        return pushViaADB(local, to: remoteDir)
     }
 
     /// Galeri ogeleri.

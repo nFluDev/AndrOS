@@ -415,14 +415,28 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
         let oldIDs = filtered.map { $0.name + $0.number }
         filtered = items.filter { SearchMatch.matchesAny(q, [$0.name, $0.number]) }
         if filtered.isEmpty {
+            // Bos liste yeterli degil: SEBEBINI soyle. En sik sebep
+            // telefonda kisiler izninin verilmemis olmasi.
+            let why = AndroidData.lastFailure ?? ""
+            let detail: String
+            if !items.isEmpty {
+                detail = L("Aramayı değiştir ya da temizle.", "Change or clear the search.")
+            } else if why.contains("permission") || why.contains("CONTACTS") {
+                detail = L("Telefondaki AndrOS uygulamasında “Kişiler” iznini ver; "
+                         + "sonra bu sayfayı yenile.",
+                           "Grant the “Contacts” permission in the AndrOS app on the "
+                         + "phone, then refresh this page.")
+            } else if why == "notconnected" {
+                detail = L("Telefon bağlı değil. Cihazlar’dan eşleştir.",
+                           "The phone is not connected. Pair it in Devices.")
+            } else {
+                detail = L("Telefon bağlandığında kişiler burada listelenir.",
+                           "Contacts appear here once a phone is connected.")
+            }
             emptyState().show(
                 items.isEmpty ? L("Kişi yok", "No contacts")
                               : L("Eşleşen kişi yok", "No matching contact"),
-                items.isEmpty ? L("Telefon bağlandığında kişiler burada listelenir.",
-                                  "Contacts appear here once a phone is connected.")
-                              : L("Aramayı değiştir ya da temizle.",
-                                  "Change or clear the search."),
-                symbol: "person.crop.circle")
+                detail, symbol: "person.crop.circle")
         } else { emptyState().isHidden = true }
         reloadKeepingState(table, oldIDs: oldIDs, newIDs: filtered.map { $0.name + $0.number })
     }

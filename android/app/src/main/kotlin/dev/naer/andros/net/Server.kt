@@ -215,7 +215,7 @@ class Server(
                     // AKAN istekler SIRAYLA: govdeyi bloklar halinde
                     // dogrudan sokete yaziyorlar ve Mac tarafinda tek bir
                     // blok alicisi var — ust uste binerlerse veri karisir.
-                    op in STREAMING -> handlers.handle(id, op, args, out)
+                    op in STREAMING -> handlers.handle(id, op, args, out, input)
                     else -> {
                         // OTEKI ISTEKLER PARALEL.
                         //
@@ -229,7 +229,7 @@ class Server(
                         // bogmayalim.
                         launch(guard) {
                             gate.withPermit {
-                                val r = try { handlers.handle(id, op, args, out) }
+                                val r = try { handlers.handle(id, op, args, out, input) }
                                         catch (e: Throwable) {
                                             Log.w(TAG, "$op hata: ${e.message}")
                                             Reply.err(id, "failed", e.message ?: "hata")
@@ -256,7 +256,9 @@ class Server(
     companion object {
         private const val TAG = "AndrOS.Server"
         /// Govdesini dogrudan sokete akitan istekler — SIRAYLA islenmeli.
-        private val STREAMING = setOf("files.read", "bench")
+        // Govdesini dogrudan sokete akitan ya da soketten OKUYAN
+        // istekler: sirali islenmeli, araya baska cerceve giremez.
+        private val STREAMING = setOf("files.read", "files.write", "bench")
         /** Kayitli olmayan aralikta sabit port. */
         const val DEFAULT_PORT = 47821
     }

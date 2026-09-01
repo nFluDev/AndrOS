@@ -136,13 +136,19 @@ public final class TransferQueue {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
 
-            // UYGULAMA YOLU once (indirmede): adb'siz calismak hedef.
-            if item.direction == .download, let d = self.data,
-               d.companion?.isReady == true {
-                let ok = d.pullPreferringApp(item.remote, to: item.local) { got, total in
-                    guard total > 0 else { return }
-                    item.progress = min(100, got * 100 / total)
-                    self.notify()
+            // UYGULAMA YOLU once: adb'siz calismak hedef. Yukleme de
+            // ayni yoldan gidiyor (`files.write`).
+            if let d = self.data, d.companion?.isReady == true {
+                let ok: Bool
+                if item.direction == .download {
+                    ok = d.pull(item.remote, to: item.local) { got, total in
+                        guard total > 0 else { return }
+                        item.progress = min(100, got * 100 / total)
+                        self.notify()
+                    }
+                } else {
+                    ok = d.push(item.local, to: item.remote)
+                    item.progress = ok ? 100 : 0
                 }
                 if item.state != .cancelled {
                     item.state = ok ? .done : .failed

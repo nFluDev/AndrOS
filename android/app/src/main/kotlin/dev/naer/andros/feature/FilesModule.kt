@@ -6,6 +6,7 @@ import dev.naer.andros.net.Frame
 import dev.naer.andros.net.Reply
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 
@@ -66,6 +67,41 @@ class FilesModule(private val ctx: Context) {
         // Bos blok = akis bitti.
         Frame.writeBlob(out, id, ByteArray(0), 0, 0)
         return null
+    }
+
+    /**
+     * Mac'ten dosya alir.
+     *
+     * Akis `read`in tersi: Mac once bu istegi yolluyor, sonra 256 KB'lik
+     * ikili bloklar geliyor; bos blok "bitti" demek. Bloklari BURADAN
+     * okuyoruz, cunku okuma dongusu bu istegi sirali (STREAMING)
+     * isliyor ve arada baska cerceve giremiyor.
+     */
+    fun write(id: Int, path: String, input: DataInputStream): JSONObject {
+        val f = resolve(path) ?: return Reply.err(id, "denied", "Bu yol dışarıda")
+        f.parentFile?.mkdirs()
+        var written = 0L
+        try {
+            f.outputStream().use { out ->
+                while (true) {
+                    val msg = Frame.read(input)
+                    if (msg.type != Frame.BLOB) continue
+                    // Ilk 4 bayt istek kimligi.
+                    if (msg.body.size <= 4) break          // bos blok = bitti
+                    out.write(msg.body, 4, msg.body.size - 4)
+                    written += msg.body.size - 4
+                }
+            }
+        } catch (e: Throwable) {
+            runCatching { f.delete() }
+            return Reply.err(id, "failed", e.message ?: "yazılamadı")
+        }
+        // Galeri/muzik uygulamalari yeni dosyayi gorsun.
+        runCatching {
+            android.media.MediaScannerConnection.scanFile(
+                ctx, arrayOf(f.path), null, null)
+        }
+        return Reply.ok(id, JSONObject().put("written", written))
     }
 
     fun mkdir(id: Int, path: String): JSONObject {

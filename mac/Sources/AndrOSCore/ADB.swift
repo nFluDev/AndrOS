@@ -113,6 +113,15 @@ public struct ADB {
     /// galeri kucuk resimleri ve muzik listesiyle ayni siraya girip
     /// panellerin isteklerini zaman asimina ugratiyordu ("muzigi actim,
     /// aramalar kayboldu"). Bir kez okuyup sakliyoruz.
+    /// adb'nin ELINDE bir cihaz var mi?
+    ///
+    /// Yoksa `pull`/`push` cagirmak bosuna: her seferinde birkac
+    /// saniyelik zaman asimi ve sessiz basarisizlik demek.
+    public var hasDevice: Bool {
+        guard let out = try? checked(["devices"], timeout: 5) else { return false }
+        return out.split(separator: "\n").dropFirst().contains { $0.contains("\tdevice") }
+    }
+
     public func getProp(_ key: String) -> String {
         let ck = (serial ?? "-") + "|" + key
         ADB.propLock.lock()

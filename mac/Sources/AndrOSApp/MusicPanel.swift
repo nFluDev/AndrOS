@@ -530,7 +530,7 @@ final class MusicPanel: NSViewController, AndrOSPanel,
         spinner.startAnimation(nil)
         let dest = inbox
         DispatchQueue.global().async { [weak self] in
-            _ = try? d.adb.run(["shell", "mkdir", "-p", "\"\(dest)\""])
+            _ = d.mkdirPreferringApp(dest)
             var pushed: [String] = []
             for u in urls where d.push(u.path, to: dest) {
                 pushed.append(dest + "/" + u.lastPathComponent)

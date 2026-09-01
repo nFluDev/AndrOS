@@ -419,18 +419,28 @@ public struct AndroidData {
         }
     }
 
+    /// adb ile indirme — YALNIZ geri dusus.
+    ///
+    /// Asil yol `pull(_:to:)`, o da eslesmis uygulamayi tercih ediyor
+    /// (bkz. CompanionBridge). Bu ayrim onemli: kullanici hata
+    /// ayiklamayi kapatip kabloyu cikardiginda adb yok ve DOGRUDAN
+    /// adb cagiran her yer sessizce basarisiz oluyordu — surukle
+    /// birak, resim acma, kopyalama, APK cikarma… hepsi.
+    ///
     /// HAM surec kullaniliyor: Foundation'in Process'i Unicode
     /// normalizasyonunu bozdugu icin Turkce/Kiril adli dosyalar
     /// "No such file or directory" veriyordu. Bkz. RawProcess.
     @discardableResult
-    public func pull(_ remote: String, to local: String) -> Bool {
+    public func pullViaADB(_ remote: String, to local: String) -> Bool {
+        guard adb.hasDevice else { return false }
         var args = adb.serial.map { ["-s", $0] } ?? []
         args += ["pull", remote, local]
         return RawProcess.run(adb.path, args).code == 0
     }
 
     @discardableResult
-    public func push(_ local: String, to remote: String) -> Bool {
+    public func pushViaADB(_ local: String, to remote: String) -> Bool {
+        guard adb.hasDevice else { return false }
         var args = adb.serial.map { ["-s", $0] } ?? []
         args += ["push", local, remote]
         return RawProcess.run(adb.path, args).code == 0

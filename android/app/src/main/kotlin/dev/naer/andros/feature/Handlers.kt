@@ -3,6 +3,7 @@ package dev.naer.andros.feature
 import android.content.Context
 import dev.naer.andros.net.Reply
 import org.json.JSONObject
+import java.io.DataInputStream
 import java.io.DataOutputStream
 
 /**
@@ -30,7 +31,8 @@ class Handlers(private val ctx: Context) {
     private val files by lazy { FilesModule(ctx) }
     private val phone by lazy { CallModule(ctx) }
 
-    fun handle(id: Int, op: String, a: JSONObject, out: DataOutputStream): JSONObject? =
+    fun handle(id: Int, op: String, a: JSONObject, out: DataOutputStream,
+               input: DataInputStream): JSONObject? =
         when (op) {
             "ping"               -> Reply.ok(id, JSONObject().put("pong", true))
             // Hiz olcumu: istenen kadar veriyi ikili cerceveler halinde
@@ -72,6 +74,7 @@ class Handlers(private val ctx: Context) {
 
             "files.list"         -> files.list(id, a.optString("path"))
             "files.read"         -> files.read(id, a.optString("path"), out)
+            "files.write"        -> files.write(id, a.optString("path"), input)
             "files.mkdir"        -> files.mkdir(id, a.optString("path"))
             "files.delete"       -> files.delete(id, a.optString("path"))
             "files.move"         -> files.move(id, a.optString("from"), a.optString("to"))

@@ -299,7 +299,7 @@ final class GalleryPanel: NSViewController, AndrOSPanel,
         spinner.startAnimation(nil)
         let dest = inbox
         DispatchQueue.global().async { [weak self] in
-            _ = try? d.adb.run(["shell", "mkdir", "-p", dest])
+            _ = d.mkdirPreferringApp(dest)
             var ok = 0
             for u in accepted where d.push(u.path, to: dest) { ok += 1 }
             // Galeri uygulamasi yeni dosyalari gorsun diye MediaStore'u tetikle
@@ -406,6 +406,31 @@ final class GalleryPanel: NSViewController, AndrOSPanel,
             showLocal(local, m: m, cached: true)
             return
         }
+        // RESIM DE AKISLA: telefondaki HTTP sunucusundan dogrudan
+        // okunuyor, diske indirilmiyor. Videoda zaten boyleydi;
+        // resimde indirme adimi gereksiz bir bekleme uretiyordu
+        // (ve adb yokken hic calismiyordu).
+        if !m.isVideo, d.companion?.isReady == true {
+            viewerSpinner.startAnimation(nil)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let url = d.streamURL(for: m.path)
+                let img = url.flatMap { NSImage(contentsOf: $0) }
+                DispatchQueue.main.async {
+                    guard let self, self.pendingPath == m.path else { return }
+                    self.viewerSpinner.stopAnimation(nil)
+                    guard let img else { self.downloadAndShow(m, d); return }
+                    self.playerView.isHidden = true
+                    self.imageView.isHidden = false
+                    self.imageView.image = img
+                    self.currentLocal = nil
+                    self.viewerCaption.stringValue =
+                        "\(m.name) · \(FilesPanel.human(m.size))"
+                        + L(" · akış", " · streaming")
+                }
+            }
+            return
+        }
+
         // VIDEO: indirmeden AKIT. Telefondaki kucuk HTTP sunucusu
         // byte-range destekliyor, `AVPlayer` ilk saniyeler gelir gelmez
         // basliyor — buyuk dosyayi bastan sona indirmeye gerek yok.
@@ -446,21 +471,14 @@ final class GalleryPanel: NSViewController, AndrOSPanel,
             at: local.deletingLastPathComponent(), withIntermediateDirectories: true)
         downloadHandle?.cancel()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var args = d.adb.serial.map { ["-s", $0] } ?? []
-            args += ["pull", m.path, local.path]
-            let r = RawProcess.runStreaming(
-                d.adb.path, args,
-                onHandle: { h in DispatchQueue.main.async { self?.downloadHandle = h } },
-                onProgress: { pct in
-                    DispatchQueue.main.async {
-                        guard self?.pendingPath == m.path else { return }
-                        self?.progress.doubleValue = Double(pct)
-                    }
-                },
-                timeout: 600)
-            let ok = r.code == 0
-                && (try? FileManager.default.attributesOfItem(atPath: local.path)[.size] as? Int)
-                    .flatMap { $0 }.map { $0 > 0 } == true
+            // ONCE UYGULAMA, sonra adb (bkz. AndroidData.pull).
+            let ok = d.pull(m.path, to: local.path) { got, total in
+                guard total > 0 else { return }
+                DispatchQueue.main.async {
+                    guard self?.pendingPath == m.path else { return }
+                    self?.progress.doubleValue = Double(got) * 100 / Double(total)
+                }
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.downloadHandle = nil
@@ -468,7 +486,11 @@ final class GalleryPanel: NSViewController, AndrOSPanel,
                 // Bu arada baska bir oge secildiyse bunu ACMA.
                 guard self.pendingPath == m.path else { return }
                 self.viewerSpinner.stopAnimation(nil)
-                guard ok else { self.viewerCaption.stringValue = L("İndirilemedi: \(m.name)", "Download failed: \(m.name)"); return }
+                guard ok else {
+                    self.viewerCaption.stringValue = L("İndirilemedi: \(m.name)",
+                                                       "Download failed: \(m.name)")
+                    return
+                }
                 self.viewCache[m.path] = local
                 self.showLocal(local, m: m, cached: false)
             }
