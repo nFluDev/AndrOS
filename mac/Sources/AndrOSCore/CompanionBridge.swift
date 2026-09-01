@@ -185,17 +185,31 @@ public extension AndroidData {
     }
 
     /// Album kapagi — ONCE UYGULAMA, sonra adb.
-    func albumArtPreferringApp(albumID: String, cacheDir: URL) -> URL? {
-        let local = cacheDir.appendingPathComponent("album-\(albumID).jpg")
+    /// Album kapagi.
+    ///
+    /// Parcanin YOLU da gonderiliyor: bircok parcada MediaStore'da album
+    /// kapagi yok ama dosyanin icinde gomulu kapak var. Album kimligi
+    /// bos ya da 0 olan parcalar (ColorOS'ta sik) yalniz bu yolla kapak
+    /// alabiliyor.
+    func albumArtPreferringApp(albumID: String, trackPath: String = "",
+                               cacheDir: URL) -> URL? {
+        // Onbellek anahtari: album varsa album, yoksa parcanin kendisi.
+        let key = (Int(albumID) ?? 0) > 0
+            ? "album-\(albumID)"
+            : "track-\(abs(trackPath.hashValue))"
+        let local = cacheDir.appendingPathComponent("\(key).jpg")
         if FileManager.default.fileExists(atPath: local.path) { return local }
-        if let b = companion, b.isReady, let n = Int(albumID), n > 0,
-           let d = b.call("music.artwork", ["albumId": n, "px": 512]),
-           let b64 = d["jpeg"] as? String,
-           let data = Data(base64Encoded: b64), data.count > 512 {
-            try? FileManager.default.createDirectory(at: cacheDir,
-                                                     withIntermediateDirectories: true)
-            try? data.write(to: local)
-            return local
+        if let b = companion, b.isReady {
+            var args: [String: Any] = ["px": 256, "path": trackPath]
+            args["albumId"] = Int(albumID) ?? 0
+            if let d = b.call("music.artwork", args),
+               let b64 = d["jpeg"] as? String,
+               let data = Data(base64Encoded: b64), data.count > 512 {
+                try? FileManager.default.createDirectory(at: cacheDir,
+                                                         withIntermediateDirectories: true)
+                try? data.write(to: local)
+                return local
+            }
         }
         return albumArt(albumID: albumID, cacheDir: cacheDir)
     }

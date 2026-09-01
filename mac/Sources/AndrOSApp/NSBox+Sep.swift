@@ -10,4 +10,14 @@ extension NSBox {
         b.widthAnchor.constraint(equalToConstant: 1).isActive = true
         return b
     }
+
+    /// Dikey yigin icinde kullanilan ince YATAY ayirac.
+    static func separator() -> NSBox {
+        let b = NSBox()
+        b.boxType = .separator
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        b.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        return b
+    }
 }

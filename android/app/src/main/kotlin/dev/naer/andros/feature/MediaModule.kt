@@ -80,23 +80,63 @@ class MediaModule(private val ctx: Context) {
     /**
      * Album kapagi.
      *
-     * `albumId` uzerinden album sanatini okuyup JPEG olarak donuyor.
-     * adb yolunda bu dosya `content read` ile cekiliyordu; hata
-     * ayiklama kapaliyken kapaklar hic gelmiyordu.
+     * TEK YOL YETMIYOR. Olculdu: `loadThumbnail` legacy `albumart`
+     * adresinde bu cihazda calismiyor ("Failed to create image
+     * decoder"), yani kapaklar hic gelmiyordu. Uc kaynagi sirayla
+     * deniyoruz ve HANGISININ tuttugunu kayda geciyoruz:
+     *   1. legacy `albumart` adresini DOGRUDAN okumak — eski ama en cok
+     *      cihazda tutan yol,
+     *   2. parcanin KENDI dosyasindaki gomulu kapak
+     *      (`MediaMetadataRetriever`) — MediaStore'da kapak yoksa da var,
+     *   3. `loadThumbnail` — Android 10+ yolu.
      */
-    fun albumArt(id: Int, albumId: Long, px: Int): JSONObject {
+    fun albumArt(id: Int, albumId: Long, path: String, px: Int): JSONObject {
+        val bmp = legacyArt(albumId) ?: embeddedArt(path) ?: thumbArt(albumId, px)
+        if (bmp == null) return Reply.err(id, "noart", "kapak yok")
         return try {
-            val uri = android.content.ContentUris.withAppendedId(
-                android.net.Uri.parse("content://media/external/audio/albumart"), albumId)
-            val bmp = ctx.contentResolver.loadThumbnail(uri, Size(px, px), null)
+            val scaled = if (bmp.width > px || bmp.height > px) {
+                val s = minOf(px.toFloat() / bmp.width, px.toFloat() / bmp.height)
+                Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(),
+                                          (bmp.height * s).toInt(), true)
+            } else bmp
             val bos = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, 88, bos)
+            scaled.compress(Bitmap.CompressFormat.JPEG, 88, bos)
             Reply.ok(id, JSONObject().put("jpeg",
                 android.util.Base64.encodeToString(bos.toByteArray(),
                                                    android.util.Base64.NO_WRAP)))
         } catch (e: Exception) {
-            Reply.err(id, "noart", e.message ?: "kapak yok")
+            Reply.err(id, "noart", e.message ?: "kapak islenemedi")
         }
+    }
+
+    private fun legacyArt(albumId: Long): Bitmap? {
+        if (albumId <= 0) return null
+        return try {
+            val uri = android.content.ContentUris.withAppendedId(
+                android.net.Uri.parse("content://media/external/audio/albumart"), albumId)
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it)
+            }
+        } catch (e: Throwable) { null }
+    }
+
+    private fun embeddedArt(path: String): Bitmap? {
+        if (path.isBlank()) return null
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(path)
+            val bytes = r.embeddedPicture ?: return null
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } catch (e: Throwable) { null } finally { runCatching { r.release() } }
+    }
+
+    private fun thumbArt(albumId: Long, px: Int): Bitmap? {
+        if (albumId <= 0) return null
+        return try {
+            val uri = android.content.ContentUris.withAppendedId(
+                MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, albumId)
+            ctx.contentResolver.loadThumbnail(uri, Size(px, px), null)
+        } catch (e: Throwable) { null }
     }
 
     fun tracks(id: Int, limit: Int): JSONObject {

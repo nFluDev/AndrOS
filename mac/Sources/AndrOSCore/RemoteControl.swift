@@ -131,14 +131,46 @@ public final class RemoteControl {
     /// kisayollari var; jesti taklit etmek yerine O kisayollari
     /// yolluyoruz — sentetik cok parmakli jest API'si yok.
     private func gesture(_ g: String) {
+        Log.write("kumanda jesti: \(g)")
         switch g {
-        case "desktopLeft":  key(123, [.maskControl])     // ⌃←
-        case "desktopRight": key(124, [.maskControl])     // ⌃→
-        case "missionControl": key(126, [.maskControl])   // ⌃↑
-        case "back":         key(125, [.maskControl])     // ⌃↓ (geri döner)
+        case "desktopLeft":    chord(123)     // ⌃←
+        case "desktopRight":   chord(124)     // ⌃→
+        case "missionControl": chord(126)     // ⌃↑
+        case "back":           chord(125)     // ⌃↓
         default: break
         }
     }
+
+    /// Ctrl + ok. DEGISTIRICI TUSUN KENDISI de basiliyor.
+    ///
+    /// Bunu ogrenmek gerekti: siradan uygulamalar olayin `flags`
+    /// alanina bakiyor ve yalniz bayrak koymak yetiyor (⌘C boyle
+    /// calisiyor). Ama masaustu gecisi ve Mission Control'u WindowServer
+    /// isliyor ve o, degistiricinin DURUMUNU izliyor — durum hic
+    /// degismedigi icin bayrakli ok tusu hicbir sey yapmiyordu.
+    /// Degistirici olayi `flagsChanged` turunde olmali; normal bir tus
+    /// olayi olarak yollamak da ise yaramiyor.
+    private func chord(_ code: CGKeyCode) {
+        // Ana kuyrugu bloklamamak icin ayri sirada: aradaki kucuk
+        // bekleme WindowServer'in olaylari sirayla gormesi icin.
+        chordQueue.async { [self] in
+            if let down = CGEvent(keyboardEventSource: src, virtualKey: 59, keyDown: true) {
+                down.type = .flagsChanged
+                down.flags = .maskControl
+                down.post(tap: .cghidEventTap)
+            }
+            usleep(12_000)
+            key(code, [.maskControl])
+            usleep(12_000)
+            if let up = CGEvent(keyboardEventSource: src, virtualKey: 59, keyDown: false) {
+                up.type = .flagsChanged
+                up.flags = []
+                up.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    private let chordQueue = DispatchQueue(label: "dev.naer.andros.chord")
 
     // MARK: - Klavye
 

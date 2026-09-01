@@ -982,20 +982,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         wc.mirror.onBack      = { bridge.back() }
         wc.mirror.onText      = { bridge.type($0) }
         wc.mirror.onBackspace = { bridge.backspace() }
-        wc.onBack    = { bridge.back() }
-        wc.onHome    = { bridge.home() }
-        wc.onRecents = { bridge.recents() }
+        wc.onAction = { a in
+            switch a {
+            case .back:       bridge.back()
+            case .home:       bridge.home()
+            case .recents:    bridge.recents()
+            case .shade:      bridge.shade()
+            case .quick:      bridge.quickSettings()
+            case .screenshot: bridge.screenshot()
+            case .volumeUp:   bridge.volume(up: true)
+            case .volumeDown: bridge.volume(up: false)
+            case .rotate:     bridge.toggleAutoRotate()
+            case .lock:       bridge.lockScreen()
+            case .power:      bridge.powerDialog()
+            }
+        }
         wc.onClose   = { [weak self] in self?.stopAppMirroring() }
 
         bridge.onFrame = { [weak wc] px in wc?.mirror.show(px) }
         bridge.onInputReady = { [weak wc] ok in wc?.setInputReady(ok) }
+        bridge.onNotice = { [weak wc] code in
+            let text: String
+            switch code {
+            case "nowritesettings":
+                text = L("Otomatik döndürmeyi değiştirmek için telefonda AndrOS'a "
+                       + "“sistem ayarlarını değiştir” izni ver.",
+                         "To toggle auto-rotate, grant AndrOS the “modify system "
+                       + "settings” permission on the phone.")
+            default: text = code
+            }
+            wc?.notice(text)
+        }
         bridge.onState = { [weak self] st in
             guard let self else { return }
             self.appMirror?.setInputReady(ScreenBridge.shared.inputReady)
             self.main?.setMirroring(st == .on)
             if case .failed(let why) = st { self.explainMirrorFailure(why) }
         }
-        bridge.start(host: host, token: token)
+        // Kalite: yansitma panelindeki ayarlar. Cozunurlugu de
+        // buradan veriyoruz — gecikmeyi en cok o belirliyor.
+        let q = ScreenBridge.Quality(
+            maxSize: UserDefaults.standard.object(forKey: "mirrorMaxSize") as? Int ?? 1920,
+            fps: maxFPS,
+            mbps: max(1, bitRate / 1_000_000))
+        bridge.start(host: host, token: token, quality: q)
         wc.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         main?.setMirroring(true)

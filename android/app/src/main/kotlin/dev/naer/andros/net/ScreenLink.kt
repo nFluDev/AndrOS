@@ -7,6 +7,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.projection.MediaProjection
+import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Surface
@@ -50,6 +51,12 @@ class ScreenLink(
 
     private var width = 0
     private var height = 0
+    private var rotation = -1
+    /// Mac'in istedigi kalite. Varsayilanlar 1080p60/8 Mbit.
+    private var maxSize = 1920
+    private var fps = 60
+    private var bitrate = 8_000_000
+    private var displayListener: DisplayManager.DisplayListener? = null
     /// En son ne zaman "erisilebilirlik kapali" dedik.
     private var lastNoInputAt = 0L
 
@@ -81,6 +88,11 @@ class ScreenLink(
     fun stop() {
         runCatching { server?.close() }
         server = null
+        displayListener?.let {
+            val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+            runCatching { dm.unregisterDisplayListener(it) }
+        }
+        displayListener = null
         stopCapture()
     }
 
@@ -117,7 +129,18 @@ class ScreenLink(
             val n = input.readInt()
             val body = if (n > 0) ByteArray(n).also { input.readFully(it) } else ByteArray(0)
             when (k) {
-                KIND_START -> startCapture()
+                KIND_START -> {
+                    // Mac hangi kalitede istedigini soyluyor. Cozunurluk
+                    // ve kare hizi gecikmeyi bit hizindan cok etkiliyor:
+                    // daha az piksel = daha az kodlama, daha az veri.
+                    if (body.isNotEmpty()) runCatching {
+                        val o = JSONObject(String(body, Charsets.UTF_8))
+                        maxSize = o.optInt("maxSize", maxSize).coerceIn(480, 2560)
+                        fps = o.optInt("fps", fps).coerceIn(15, 120)
+                        bitrate = o.optInt("bitrate", bitrate).coerceIn(1, 40) * 1_000_000
+                    }
+                    startCapture()
+                }
                 KIND_STOP  -> stopCapture()
                 KIND_INPUT -> handleInput(String(body, Charsets.UTF_8))
             }
@@ -137,18 +160,35 @@ class ScreenLink(
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
-        wm.defaultDisplay.getRealMetrics(metrics)
-        // 1080p'ye sigdir: daha buyugu bant genisligini bosa harciyor.
-        val scale = minOf(1f, 1920f / maxOf(metrics.widthPixels, metrics.heightPixels))
+        val disp = wm.defaultDisplay
+        disp.getRealMetrics(metrics)
+        rotation = disp.rotation
+        // Istenen en buyuk kenara sigdir: daha buyugu bant genisligini
+        // ve kodlama suresini bosa harciyor.
+        val scale = minOf(1f, maxSize.toFloat() / maxOf(metrics.widthPixels, metrics.heightPixels))
         width = (metrics.widthPixels * scale).toInt() / 2 * 2
         height = (metrics.heightPixels * scale).toInt() / 2 * 2
 
         val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT,
                        MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, 8_000_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, 60)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // GECIKME. Kodlayici varsayilan olarak birkac kareyi
+            // tamponluyor ve akis "gec" hissettiriyor. Bu iki anahtar
+            // donanim kodlayicisina "gercek zamanli, tampon yapma"
+            // diyor. Desteklenmeyen cihazda yok sayiliyor, zarari yok.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                setInteger(MediaFormat.KEY_PRIORITY, 0)          // gercek zamanli
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setInteger(MediaFormat.KEY_LATENCY, 1)           // 1 kare gecikme
+            }
+            // Sabit bit hizi: degisken hizda hareketli sahnede tampon
+            // sisiyor ve gecikme birikiyor.
+            setInteger(MediaFormat.KEY_BITRATE_MODE,
+                       MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
         }
         val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
         enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -164,7 +204,38 @@ class ScreenLink(
 
         sendMeta()
         thread(isDaemon = true, name = "andros-screen-drain") { drain(enc) }
-        Log.i(TAG, "ekran yakalaniyor: ${width}x$height")
+        watchRotation()
+        Log.i(TAG, "ekran yakalaniyor: ${width}x$height (donus $rotation)")
+    }
+
+    /**
+     * Telefon donunce yakalamayi YENIDEN KURAR.
+     *
+     * Sanal ekranin olcusu sabit; telefon yan cevrilince goruntu o sabit
+     * cerceveye sikisiyor ve yamuk duruyordu. Kodlayicinin giris yuzeyi
+     * de olusturulurken sabitlendigi icin yalniz `VirtualDisplay.resize`
+     * yetmiyor — ikisini birden kuruyoruz. Mac tarafi yeni olcuyu
+     * cozulen kareden anliyor, ek bir sey yapmasi gerekmiyor.
+     */
+    private fun watchRotation() {
+        if (displayListener != null) return
+        val dm = ctx.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        val l = object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(id: Int) {}
+            override fun onDisplayRemoved(id: Int) {}
+            override fun onDisplayChanged(id: Int) {
+                if (id != android.view.Display.DEFAULT_DISPLAY || !running) return
+                val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                @Suppress("DEPRECATION")
+                val now = wm.defaultDisplay.rotation
+                if (now == rotation) return
+                Log.i(TAG, "donus degisti: $rotation -> $now")
+                stopCapture()
+                startCapture()
+            }
+        }
+        dm.registerDisplayListener(l, android.os.Handler(android.os.Looper.getMainLooper()))
+        displayListener = l
     }
 
     private fun stopCapture() {
@@ -234,8 +305,52 @@ class ScreenLink(
             "back"    -> svc.back()
             "home"    -> svc.home()
             "recents" -> svc.recents()
+            "shade"   -> svc.notifications()
+            "quick"   -> svc.quickSettings()
+            "power"   -> svc.powerDialog()
+            "lock"    -> svc.lockScreen()
+            "shot"    -> svc.screenshot()
+            // Ses: erisilebilirlik degil, ses yoneticisi isi. Donanim
+            // tusu ENJEKTE EDILEMIYOR (adb'siz yolun siniri), ama sesi
+            // dogrudan degistirmek ayni sonucu veriyor ve sistemin kendi
+            // gostergesini de aciyor.
+            "vol"     -> volume(o.optInt("d", 1))
+            "rotate"  -> toggleRotation()
             "text"    -> svc.type(o.optString("s"))
             "backspace" -> svc.backspace()
+        }
+    }
+
+    private fun volume(direction: Int) {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val step = if (direction >= 0) android.media.AudioManager.ADJUST_RAISE
+                   else android.media.AudioManager.ADJUST_LOWER
+        runCatching {
+            am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, step,
+                                  android.media.AudioManager.FLAG_SHOW_UI)
+        }
+    }
+
+    /**
+     * Otomatik donmeyi ac/kapa.
+     *
+     * Ekrani ZORLA dondurmek adb (ya da sistem uygulamasi olmak)
+     * istiyor; adb'siz yapabildigimiz, telefonun otomatik donmesini
+     * acip kapamak. Bunun icin sistem ayarlarini yazma izni gerekiyor;
+     * yoksa Mac'e soyluyoruz, sessizce dusurmuyoruz.
+     */
+    private fun toggleRotation() {
+        runCatching {
+            if (!android.provider.Settings.System.canWrite(ctx)) {
+                sendError("nowritesettings"); return
+            }
+            val now = android.provider.Settings.System.getInt(
+                ctx.contentResolver,
+                android.provider.Settings.System.ACCELEROMETER_ROTATION, 0)
+            android.provider.Settings.System.putInt(
+                ctx.contentResolver,
+                android.provider.Settings.System.ACCELEROMETER_ROTATION,
+                if (now == 0) 1 else 0)
         }
     }
 

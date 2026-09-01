@@ -85,6 +85,19 @@ class InputService : AccessibilityService() {
     fun recents() = performGlobalAction(GLOBAL_ACTION_RECENTS)
     fun notifications() = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
 
+    /// Hizli ayarlar, guc menusu, kilit ve ekran goruntusu de
+    /// erisilebilirligin KENDI global eylemleri — adb gerekmiyor.
+    /// Kilit ve ekran goruntusu daha yeni surumlerde eklendi; olmayan
+    /// surumde sessizce yok sayiliyor.
+    fun quickSettings() = performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+    fun powerDialog(): Boolean = performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+    fun lockScreen(): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= 28)
+            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) else false
+    fun screenshot(): Boolean =
+        if (android.os.Build.VERSION.SDK_INT >= 30)
+            performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT) else false
+
     // MARK: - Metin
 
     /**

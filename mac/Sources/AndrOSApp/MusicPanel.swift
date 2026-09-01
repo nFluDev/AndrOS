@@ -55,6 +55,7 @@ final class MusicPanel: NSViewController, AndrOSPanel,
 
     private static let cacheDir: URL = dir("music")
     private static let artDir: URL = dir("albumart")
+    private static let artGate = DispatchSemaphore(value: 2)
     private static func dir(_ n: String) -> URL {
         let d = FileManager.default.temporaryDirectory
             .appendingPathComponent("AndrOS/\(n)", isDirectory: true)
@@ -364,13 +365,29 @@ final class MusicPanel: NSViewController, AndrOSPanel,
         }
     }
 
+    /// Kapak onbellegi anahtari. Album kimligi bos ya da 0 olan
+    /// parcalarda (ColorOS'ta sik) kapak dosyanin icinden geliyor;
+    /// hepsini tek anahtarda toplamak hepsine ayni kapagi verirdi.
+    private static func artKey(_ t: AndroidData.Track) -> String {
+        (Int(t.albumID) ?? 0) > 0 ? t.albumID : t.path
+    }
+
     private func loadArt(_ t: AndroidData.Track) {
-        let key = t.albumID
-        guard !key.isEmpty, artCache[key] == nil, !artLoading.contains(key),
+        // Anahtar album degil PARCA olabiliyor: album kimligi bos ya da
+        // 0 olan parcalarda kapak yalniz dosyanin icinden geliyor ve
+        // hepsini tek anahtarda toplamak hepsine ayni kapagi verirdi.
+        let key = Self.artKey(t)
+        guard artCache[key] == nil, !artLoading.contains(key),
               let d = data else { return }
         artLoading.insert(key)
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let img = d.albumArtPreferringApp(albumID: key, cacheDir: MusicPanel.artDir)
+            // AYNI ANDA EN FAZLA IKI KAPAK. Telefon istekleri dortlu bir
+            // kapiyla isliyor; gorunen her satir icin kapak istemek o
+            // kapiyi doldurup listeyi ve oynatmayi bekletiyordu.
+            MusicPanel.artGate.wait()
+            defer { MusicPanel.artGate.signal() }
+            let img = d.albumArtPreferringApp(albumID: t.albumID, trackPath: t.path,
+                                              cacheDir: MusicPanel.artDir)
                 .flatMap { NSImage(contentsOf: $0) }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -884,7 +901,7 @@ final class MusicPanel: NSViewController, AndrOSPanel,
         let playing = MusicEngine.shared.current?.path == tr.path
 
         let cover = NSImageView()
-        if let img = artCache[tr.albumID] {
+        if let img = artCache[Self.artKey(tr)] {
             cover.image = img
             cover.wantsLayer = true
             cover.layer?.cornerRadius = 4

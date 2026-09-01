@@ -35,6 +35,9 @@ public final class ScreenBridge {
     /// de degisebiliyor (kullanici erisilebilirligi sonradan aciyor),
     /// o yuzden `onState` yetmiyor.
     public var onInputReady: ((Bool) -> Void)?
+    /// Olumcul OLMAYAN uyari KODU: yayin surer, tek bir dugme calismaz.
+    /// Kullaniciya gosterilecek metni arayuz seciyor.
+    public var onNotice: ((String) -> Void)?
     public var onFrame: ((CVPixelBuffer) -> Void)?
 
     private var conn: NWConnection?
@@ -46,7 +49,18 @@ public final class ScreenBridge {
     private var received = 0
     private var decoded = 0
 
-    public func start(host: String, token: String) {
+    /// Kalite ayarlari. Gecikmeyi en cok COZUNURLUK ve KARE HIZI
+    /// belirliyor; bit hizi gorunuse etki ediyor.
+    public struct Quality {
+        public var maxSize: Int
+        public var fps: Int
+        public var mbps: Int
+        public init(maxSize: Int = 1920, fps: Int = 60, mbps: Int = 8) {
+            self.maxSize = maxSize; self.fps = fps; self.mbps = mbps
+        }
+    }
+
+    public func start(host: String, token: String, quality: Quality = Quality()) {
         stop()
         state = .connecting
 
@@ -71,7 +85,11 @@ public final class ScreenBridge {
             switch s {
             case .ready:
                 self.send(kind: 0, payload: Data(token.utf8))   // yetki
-                self.send(kind: 1, payload: Data())             // baslat
+                let q: [String: Any] = ["maxSize": quality.maxSize,
+                                        "fps": quality.fps,
+                                        "bitrate": quality.mbps]
+                self.send(kind: 1, payload: (try? JSONSerialization.data(
+                    withJSONObject: q)) ?? Data())              // baslat
                 self.receive()
                 self.state = .on
                 Log.write("yansıtma köprüsü açık: \(host)")
@@ -109,6 +127,13 @@ public final class ScreenBridge {
     public func back()    { input(["t": "back"]) }
     public func home()    { input(["t": "home"]) }
     public func recents() { input(["t": "recents"]) }
+    public func shade()   { input(["t": "shade"]) }
+    public func quickSettings() { input(["t": "quick"]) }
+    public func powerDialog()   { input(["t": "power"]) }
+    public func lockScreen()    { input(["t": "lock"]) }
+    public func screenshot()    { input(["t": "shot"]) }
+    public func volume(up: Bool) { input(["t": "vol", "d": up ? 1 : -1]) }
+    public func toggleAutoRotate() { input(["t": "rotate"]) }
     public func type(_ s: String) { input(["t": "text", "s": s]) }
     public func backspace() { input(["t": "backspace"]) }
 
@@ -158,13 +183,24 @@ public final class ScreenBridge {
                 guard let j = try? JSONSerialization.jsonObject(with: body)
                         as? [String: Any] else { break }
                 if let e = j["error"] as? String {
-                    // "noinput" olumcul degil: goruntu akar, dokunma gitmez.
-                    if e == "noinput" {
+                    // Her hata yayini bitirmez. "noinput" ve
+                    // "nowritesettings" tek bir dugmeyle ilgili;
+                    // bunlari olumcul saymak calisan yansitmayi
+                    // kapatirdi.
+                    switch e {
+                    case "noinput":
                         if inputReady { Log.write("yansıtma: erişilebilirlik kapalı") }
                         inputReady = false
                         DispatchQueue.main.async { self.onInputReady?(false) }
+                    case "nowritesettings":
+                        Log.write("yansıtma: sistem ayarlarını yazma izni yok")
+                        // Metni ARAYUZ yaziyor: cekirdek iki dilli
+                        // dizeleri tutmuyor, yalnizca kodu geciyor.
+                        DispatchQueue.main.async { self.onNotice?(e) }
+                    default:
+                        Log.write("yansıtma hatası: \(e)")
+                        state = .failed(e)
                     }
-                    else { Log.write("yansıtma hatası: \(e)"); state = .failed(e) }
                     break
                 }
                 let w = j["width"] as? Int ?? 0, h = j["height"] as? Int ?? 0

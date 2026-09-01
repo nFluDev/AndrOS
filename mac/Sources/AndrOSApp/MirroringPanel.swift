@@ -23,6 +23,7 @@ final class MirroringPanel: NSViewController, AndrOSPanel,
     private var lastSignature = ""
     private let bitratePopup = NSPopUpButton()
     private let fpsPopup = NSPopUpButton()
+    private let sizePopup = NSPopUpButton()
     private var sliderLabels: [String: (NSTextField, String)] = [:]
     private var sliders: [String: NSSlider] = [:]
 
@@ -59,6 +60,12 @@ final class MirroringPanel: NSViewController, AndrOSPanel,
             lbl.stringValue = String(format: "%@  %.2f", t, v)
         }
         onSetting?(k, v)
+    }
+
+    @objc private func sizeChanged() {
+        let v = [1280, 1920, 2560][sizePopup.indexOfSelectedItem]
+        UserDefaults.standard.set(v, forKey: "mirrorMaxSize")
+        onSetting?("mirrorMaxSize", v)
     }
 
     @objc private func resetImage() {
@@ -155,7 +162,17 @@ final class MirroringPanel: NSViewController, AndrOSPanel,
         fpsPopup.target = self
         fpsPopup.action = #selector(fpsChanged)
 
-        let rowA = NSStackView(views: [bitrateLabel, bitratePopup, fpsLabel, fpsPopup])
+        // Cozunurluk: uygulama yolunda GECIKMEYI en cok bu belirliyor.
+        // Az piksel = az kodlama, az veri, az bekleme.
+        let sizeLabel = NSTextField(labelWithString: L("Çözünürlük", "Resolution"))
+        sizePopup.addItems(withTitles: ["720p", "1080p", "1440p"])
+        let savedSize = UserDefaults.standard.object(forKey: "mirrorMaxSize") as? Int ?? 1920
+        sizePopup.selectItem(at: [1280, 1920, 2560].firstIndex(of: savedSize) ?? 1)
+        sizePopup.target = self
+        sizePopup.action = #selector(sizeChanged)
+
+        let rowA = NSStackView(views: [bitrateLabel, bitratePopup, fpsLabel, fpsPopup,
+                                       sizeLabel, sizePopup])
         rowA.orientation = .horizontal
         rowA.spacing = 8
 

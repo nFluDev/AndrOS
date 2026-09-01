@@ -28,8 +28,8 @@ android {
         applicationId = "dev.naer.andros"
         minSdk = 26            // Android 8.0 — kullanicinin telefonu Android 11
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.0-beta.6"
+        versionCode = 7
+        versionName = "0.1.0-beta.7"
     }
 
     signingConfigs {

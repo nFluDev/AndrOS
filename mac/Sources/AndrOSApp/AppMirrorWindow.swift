@@ -58,15 +58,40 @@ final class AppMirrorView: NSView {
         return CGRect(x: (b.width - w) / 2, y: (b.height - h) / 2, width: w, height: h)
     }
 
+    private let frameLock = NSLock()
+    private var pending: CVPixelBuffer?
+    private var scheduled = false
+    /// Ekranda duran karenin tamponu ELDE TUTULUYOR: cozucunun havuzu
+    /// tamponu geri alip yeniden kullanirsa goruntu yirtiliyor.
+    private var onScreen: CVPixelBuffer?
+
     /// Yeni kare. `IOSurface` dogrudan katmana veriliyor: VideoToolbox
     /// zaten IOSurface destekli tampon uretiyor, CGImage'e cevirmek her
     /// karede bosuna kopyalama olurdu.
+    ///
+    /// Kareler BIRIKMIYOR: ana is parcacigi mesgulken her kare icin
+    /// ayri is siraya girse gecikme kartopu gibi buyurdu. Yalniz EN YENI
+    /// kare tutuluyor, aradakiler dusuyor — yansitmada dogru olan bu.
     func show(_ px: CVPixelBuffer) {
-        guard let surf = CVPixelBufferGetIOSurface(px) else { return }
-        let w = CVPixelBufferGetWidth(px), h = CVPixelBufferGetHeight(px)
+        frameLock.lock()
+        pending = px
+        let needsWork = !scheduled
+        scheduled = true
+        frameLock.unlock()
+        guard needsWork else { return }
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            self.frameLock.lock()
+            let frame = self.pending
+            self.pending = nil
+            self.scheduled = false
+            self.frameLock.unlock()
+            guard let frame, let surf = CVPixelBufferGetIOSurface(frame) else { return }
+
+            let w = CVPixelBufferGetWidth(frame), h = CVPixelBufferGetHeight(frame)
             if Int(self.videoSize.width) != w || Int(self.videoSize.height) != h {
+                // Telefon dondu ya da olcu degisti.
                 self.videoSize = CGSize(width: w, height: h)
                 self.layout()
             }
@@ -74,6 +99,7 @@ final class AppMirrorView: NSView {
             CATransaction.setDisableActions(true)
             self.image.contents = surf.takeUnretainedValue()
             CATransaction.commit()
+            self.onScreen = frame
         }
     }
 
@@ -158,26 +184,47 @@ final class AppMirrorWindowController: NSWindowController {
         w.center()
         self.init(window: w)
 
-        // Gezinme: erisilebilirlik jestleriyle donanim tuslarina
-        // basilamiyor, o yuzden GERI/ANA EKRAN/SON UYGULAMALAR burada.
-        let bar = NSStackView(views: [
-            navButton("chevron.left", L("Geri", "Back"), #selector(back)),
-            navButton("house", L("Ana ekran", "Home"), #selector(home)),
-            navButton("square.on.square", L("Son uygulamalar", "Recents"), #selector(recents)),
+        // YAN PANEL: adb'li yansitma penceresindeki dugmelerin adb'siz
+        // yolda KARSILIGI OLANLARI. Donanim tusu enjekte edilemedigi
+        // icin ses dogrudan ses yoneticisiyle degistiriliyor; ekrani
+        // zorla dondurmek de adb istiyor, onun yerine telefonun otomatik
+        // donmesi acilip kapaniyor.
+        let side = NSStackView(views: [
+            sideButton("chevron.backward", L("Geri", "Back"), #selector(back)),
+            sideButton("circle", L("Ana ekran", "Home"), #selector(home)),
+            sideButton("square.on.square", L("Görev görünümü", "Recent apps"), #selector(recents)),
+            NSBox.separator(),
+            sideButton("bell", L("Bildirim paneli", "Notification shade"), #selector(shade)),
+            sideButton("switch.2", L("Hızlı ayarlar", "Quick settings"), #selector(quick)),
+            sideButton("camera", L("Ekran görüntüsü", "Screenshot"), #selector(shot)),
+            NSBox.separator(),
+            sideButton("speaker.wave.2", L("Ses +", "Volume up"), #selector(volUp)),
+            sideButton("speaker.wave.1", L("Ses −", "Volume down"), #selector(volDown)),
+            sideButton("rotate.right", L("Otomatik döndürmeyi aç/kapa",
+                                         "Toggle auto-rotate"), #selector(rotateAuto)),
+            NSBox.separator(),
+            sideButton("lock", L("Ekranı kilitle", "Lock screen"), #selector(lock)),
+            sideButton("power", L("Güç menüsü", "Power menu"), #selector(power)),
         ])
-        bar.orientation = .horizontal
-        bar.distribution = .fillEqually
-        bar.spacing = 8
+        side.orientation = .vertical
+        side.spacing = 6
+        side.alignment = .centerX
+        side.edgeInsets = NSEdgeInsets(top: 10, left: 6, bottom: 10, right: 6)
+        side.setContentHuggingPriority(.required, for: .horizontal)
 
         hint.font = .systemFont(ofSize: 10)
         hint.textColor = .systemOrange
         hint.alignment = .center
         hint.isHidden = true
 
-        let root = NSStackView(views: [mirror, hint, bar])
-        root.orientation = .vertical
-        root.spacing = 6
-        root.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 10, right: 10)
+        let column = NSStackView(views: [mirror, hint])
+        column.orientation = .vertical
+        column.spacing = 6
+        column.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 10, right: 0)
+
+        let root = NSStackView(views: [column, side])
+        root.orientation = .horizontal
+        root.spacing = 0
         mirror.translatesAutoresizingMaskIntoConstraints = false
         w.contentView = root
         w.delegate = self
@@ -192,22 +239,51 @@ final class AppMirrorWindowController: NSWindowController {
                              "Touch is off: on the phone open Settings › Accessibility › AndrOS.")
     }
 
-    private func navButton(_ symbol: String, _ tip: String, _ sel: Selector) -> NSButton {
+    /// Gecici uyari: pencereyi kapatmayan, tek bir dugmeyle ilgili sorun.
+    func notice(_ text: String) {
+        hint.isHidden = false
+        hint.stringValue = text
+        let shown = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self, self.hint.stringValue == shown else { return }
+            self.setInputReady(true)
+        }
+    }
+
+    private func sideButton(_ symbol: String, _ tip: String, _ sel: Selector) -> NSButton {
         let b = NSButton(image: NSImage(systemSymbolName: symbol,
                                         accessibilityDescription: tip) ?? NSImage(),
                          target: self, action: sel)
-        b.bezelStyle = .rounded
+        b.bezelStyle = .texturedRounded
+        b.isBordered = false
         b.toolTip = tip
+        b.contentTintColor = .secondaryLabelColor
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        b.heightAnchor.constraint(equalToConstant: 26).isActive = true
         return b
     }
 
-    var onBack: (() -> Void)?
-    var onHome: (() -> Void)?
-    var onRecents: (() -> Void)?
+    /// Kopruye baglanan tek nokta: pencere hangi eylemin ne yaptigini
+    /// bilmiyor, yalnizca hangisine basildigini soyluyor.
+    var onAction: ((Action) -> Void)?
 
-    @objc private func back() { onBack?() }
-    @objc private func home() { onHome?() }
-    @objc private func recents() { onRecents?() }
+    enum Action {
+        case back, home, recents, shade, quick, screenshot
+        case volumeUp, volumeDown, rotate, lock, power
+    }
+
+    @objc private func back()    { onAction?(.back) }
+    @objc private func home()    { onAction?(.home) }
+    @objc private func recents() { onAction?(.recents) }
+    @objc private func shade()   { onAction?(.shade) }
+    @objc private func quick()   { onAction?(.quick) }
+    @objc private func shot()    { onAction?(.screenshot) }
+    @objc private func volUp()   { onAction?(.volumeUp) }
+    @objc private func volDown() { onAction?(.volumeDown) }
+    @objc private func rotateAuto() { onAction?(.rotate) }
+    @objc private func lock()    { onAction?(.lock) }
+    @objc private func power()   { onAction?(.power) }
 }
 
 extension AppMirrorWindowController: NSWindowDelegate {
