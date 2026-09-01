@@ -707,6 +707,46 @@ do {
             exit(1)
         }
 
+    // Arama akisini ucu uca sinar.
+    //   androsctl call <ws> listen           (gelen aramayi kabul eder)
+    //   androsctl call <ws> decline <not>    (hizli mesajla reddeder)
+    //   androsctl call <ws> dial <kimlik>
+    case "call":
+        let addr = args.count > 1 ? args[1] : "wss://endpoint.gamehost.dev/andros.signal/ws"
+        let mode = args.count > 2 ? args[2] : "listen"
+        SignalHub.serverURL = addr
+        let hub = SignalHub.shared
+        print("kimlik: \(hub.id)")
+        hub.onCall = { from, m in CallEngine.shared.handle(from: from, m) }
+        var done = false
+        CallEngine.shared.onState = { st in
+            print("durum: \(st)")
+            switch st {
+            case .ringing:
+                if mode == "decline" {
+                    let note = args.count > 3 ? args[3] : "Şimdi konuşamam"
+                    CallEngine.shared.decline(note: note)
+                } else if mode == "listen" {
+                    CallEngine.shared.accept()
+                }
+            case .active, .ended: done = true
+            default: break
+            }
+        }
+        hub.start()
+        if mode == "dial", args.count > 3 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                CallEngine.shared.call(peer: args[3], video: false)
+            }
+        }
+        let until = Date().addingTimeInterval(30)
+        while Date() < until, !done {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        // Bitis ekrani birkac saniye duruyor; notu gorebilmek icin bekle.
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        hub.stop()
+
     case "parse":
         guard args.count >= 2 else { bad("kullanim: androsctl parse <dosya.h264|.h265>"); exit(1) }
         let path = args[1]

@@ -260,6 +260,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         SignalHub.shared.onMessage = { [weak self] from, text, at in
             self?.handleNetworkMessage(from: from, text: text, at: at)
         }
+        // Arama: gelen davetler cagri motoruna, durum penceresine.
+        SignalHub.shared.onCall = { from, payload in
+            CallEngine.shared.handle(from: from, payload)
+        }
+        CallEngine.shared.onState = { [weak self] st in
+            CallWindowController.shared.apply(st) { [weak self] peer in
+                self?.callerName(for: peer) ?? peer
+            }
+            if case .ringing(let p, _) = st {
+                Notify.post(title: L("Gelen arama", "Incoming call"),
+                            body: self?.callerName(for: p) ?? p,
+                            id: "andros.call.\(p)")
+            }
+        }
         SignalHub.shared.start()
 
         // AndrOS artik bir KABUK: acilista hub gosteriliyor, aynalama
@@ -738,6 +752,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     body: text, id: "andros.msg.\(from).\(Int(at.timeIntervalSince1970))")
         // Acik sohbet varsa hemen gorunsun.
         NotificationCenter.default.post(name: .androsNotificationsChanged, object: nil)
+    }
+
+    /// Arayanin GORUNEN adi.
+    ///
+    /// Ag kimlik konusuyor; kullaniciya 16 haneli bir dizi gostermek
+    /// kimin aradigini soylemiyor. Once kimlige bagli numara, sonra o
+    /// numaranin rehberdeki adi araniyor.
+    private func callerName(for peer: String) -> String {
+        guard let number = NetworkMessages.shared.number(forPeer: peer) else { return peer }
+        if let d = currentData {
+            let want = SignalClient.normalize(number)
+            if let hit = d.contactsPreferringApp().first(where: {
+                SignalClient.normalize($0.number) == want
+            }) { return hit.name }
+        }
+        return number
     }
 
     /// Erisilebilirlik izni yoksa BIR KEZ sor.

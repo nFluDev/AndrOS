@@ -406,12 +406,17 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
     }
 
     func didAppear() {
+        SignalHub.shared.onPresence = { [weak self] in
+            DispatchQueue.main.async { self?.table.reloadData() }
+        }
         guard let d = data else { return }
         DispatchQueue.global().async { [weak self] in
             // UYGULAMA yolu: `contacts()` yalniz adb kullaniyor ve hata
             // ayiklama kapaliyken hep bos donuyordu — kisiler hic
             // gelmiyordu.
             let c = d.contactsPreferringApp()
+            // Kimler AndrOS aginda bagli? Yanit gelince liste tazeleniyor.
+            SignalHub.shared.checkReachable(c.prefix(200).map(\.number))
             let me = AndroidData.phoneOwner
             DispatchQueue.main.async {
                 self?.owner = me
@@ -548,9 +553,17 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
         r.orientation = .horizontal
         r.spacing = 10
         r.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 4, right: 6)
-        r.onSwipeRight = { [weak self] in self?.callNumber(c.number) }
+        r.onSwipeRight = { [weak self] in self?.placeCall(c.number) }
         r.onSwipeLeft = { [weak self] in
             NotificationCenter.default.post(name: .androsOpenConversation, object: c.number)
+        }
+        // AndrOS aginda BAGLI olanlari isaretle: hangi numaranin
+        // internetten aranabildigi gorunsun.
+        if SignalHub.shared.peerID(forNumber: c.number) != nil {
+            let tag = NSTextField(labelWithString: "AndrOS")
+            tag.font = .systemFont(ofSize: 9, weight: .semibold)
+            tag.textColor = .systemGreen
+            r.addArrangedSubview(tag)
         }
         return r
     }
@@ -606,6 +619,21 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
             }
         }
         return row
+    }
+
+    /// Aramayi baslatir.
+    ///
+    /// Karsi taraf AndrOS aginda BAGLIYSA internetten arıyoruz:
+    /// ucretsiz, uctan uca sifreli ve Mac'ten konusulabiliyor. Degilse
+    /// telefonun hattina dusuyoruz — orada konusma telefondan yapiliyor,
+    /// cunku Android gorusme sesini uygulamalara vermiyor.
+    private func placeCall(_ number: String) {
+        if let peer = SignalHub.shared.peerID(forNumber: number) {
+            NetworkMessages.shared.remember(peer: peer, number: number)
+            CallEngine.shared.call(peer: peer, video: false)
+            return
+        }
+        callNumber(number)
     }
 
     /// Telefonda aramayi baslatir (Aramalar panelindeki yolun ayni).
