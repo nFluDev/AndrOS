@@ -1,6 +1,7 @@
 import Foundation
 import CoreVideo
 import AndrOSCore
+import CryptoKit
 
 /// Test icin minimal joystick surucusu.
 final class KeyMapperProbe {
@@ -572,6 +573,51 @@ do {
             } else { bad("SPS/PPS reddedildi") }
         } else { warn("test vektoru bulunamadi, decoder testi atlandi") }
         exit(0)
+    // Kimlik ve zarf turetmesinin ANDROID ve SUNUCU ile ayni oldugunu
+    // olcer. Uc dilde ayni sonucu uretmezse arama agi hic kurulmaz ve
+    // hata "bir sey olmuyor" diye gorunur — o yuzden sinanabilir olmali.
+    case "signal":
+        let k = SignalKeys()
+        print("kimlik:      \(k.id)")
+        print("ed açık:     \(k.edPublic.base64EncodedString())")
+        print("x açık:      \(k.xPublic.base64EncodedString())")
+
+        // Bilinen vektor: sifirlarla dolu bir acik anahtarin kimligi.
+        // Ayni deger Android ve sunucuda da cikmali.
+        let zero = Data(repeating: 0, count: 32)
+        print("sıfır anahtarın kimliği: \(SignalKeys.id(for: zero))")
+
+        // Iki taraf birbirini tanisip muhurlu mesaj degistirsin.
+        let a = SignalKeys()
+        let bPriv = Curve25519.KeyAgreement.PrivateKey()
+        let bEd = Curve25519.Signing.PrivateKey()
+        let bID = SignalKeys.id(for: bEd.publicKey.rawRepresentation)
+        guard let key = a.sharedKey(with: bPriv.publicKey.rawRepresentation,
+                                    myID: a.id, theirID: bID),
+              let sealed = Envelope.seal(key, ["t": "msg", "text": "merhaba"]),
+              let opened = Envelope.open(key, sealed) else {
+            print("MÜHÜRLEME BAŞARISIZ"); exit(1)
+        }
+        print("mühürlü boyut: \(sealed.count) bayt · açıldı: \(opened)")
+
+        // ANDROID ile uyum icin sabit anahtarli vektor. BouncyCastle
+        // ile CryptoKit ayni bicimi uretmezse mesajlar sessizce
+        // acilmiyor; bu satirlar iki tarafi karsilastirmayi mumkun
+        // kiliyor.
+        let fixed = SymmetricKey(data: Data(repeating: 7, count: 32))
+        if let v = Envelope.seal(fixed, ["t": "msg", "text": "sınama"]) {
+            print("vektör anahtar: \(Data(repeating: 7, count: 32).base64EncodedString())")
+            print("vektör zarf:    \(v.base64EncodedString())")
+        }
+
+        // Tanisma paketi kendi kimligiyle dogrulanmali, baskasiyla degil.
+        let intro = Envelope.intro(a)
+        let ok = Envelope.openIntro(intro, from: a.id) != nil
+        let bad = Envelope.openIntro(intro, from: bID) == nil
+        print("tanışma doğrulama: \(ok ? "geçti" : "KALDI") · "
+            + "yanlış kimlik reddi: \(bad ? "geçti" : "KALDI")")
+        if !ok || !bad { exit(1) }
+
     case "parse":
         guard args.count >= 2 else { bad("kullanim: androsctl parse <dosya.h264|.h265>"); exit(1) }
         let path = args[1]

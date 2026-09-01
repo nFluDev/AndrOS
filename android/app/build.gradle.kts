@@ -69,4 +69,11 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // WebSocket icin: Android'de govdede WS istemcisi yok ve TLS'i
+    // elle yazmak (sertifika zinciri, SNI, vekil) gereksiz risk.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Ed25519 / X25519 / ChaCha20-Poly1305: Android 13'ten ONCE
+    // govdede Ed25519 yok, kullanicinin telefonu Android 11. Sistemin
+    // kendi (gizli) BouncyCastle'i baska pakette, cakismiyor.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 }
