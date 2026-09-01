@@ -243,11 +243,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             Notify.withdraw(key)
         }
         Notify.shared.onOpen = { [weak self] key in
-            // Guncelleme bildirimi: dogrudan indirmeye goturur.
+            // Guncelleme bildirimi: gomulu indiriciyi baslatir.
             if key.hasPrefix("andros.update."),
-               let u = UserDefaults.standard.string(forKey: "pendingUpdateURL"),
-               let url = URL(string: u) {
-                NSWorkspace.shared.open(url)
+               let u = UserDefaults.standard.string(forKey: "pendingUpdateURL") {
+                let v = String(key.dropFirst("andros.update.".count))
+                SelfUpdate.run(from: u, version: v)
                 return
             }
             self?.main?.showWindow(nil)

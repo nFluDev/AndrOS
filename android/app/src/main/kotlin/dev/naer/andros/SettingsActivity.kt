@@ -135,8 +135,10 @@ class SettingsActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Yeni sürüm: $version")
             .setMessage(notes.ifBlank { "Değişiklik notu yok." })
-            .setPositiveButton("İndir") { _, _ ->
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            // Tarayiciya ATMIYORUZ: indirme uygulamanin icinde,
+            // kurulum ekrani da dogrudan aciliyor.
+            .setPositiveButton("İndir ve kur") { _, _ ->
+                Installer.downloadAndInstall(this, url, version)
             }
             .setNegativeButton("Şimdi değil", null)
             .show()

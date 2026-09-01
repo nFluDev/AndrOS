@@ -230,10 +230,13 @@ final class SettingsPanel: NSViewController {
                 a.messageText = L("Yeni sürüm: \(v)", "New version: \(v)")
                 a.informativeText = notes.isEmpty
                     ? L("Değişiklik notu yok.", "No release notes.") : notes
-                a.addButton(withTitle: L("İndir", "Download"))
+                // Tarayiciya ATMIYORUZ: indirme, acma ve degistirme
+                // uygulamanin icinde.
+                a.addButton(withTitle: L("İndir ve kur", "Download and install"))
                 a.addButton(withTitle: L("Şimdi değil", "Not now"))
-                if a.runModal() == .alertFirstButtonReturn,
-                   let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                if a.runModal() == .alertFirstButtonReturn {
+                    SelfUpdate.run(from: url, version: v)
+                }
             case .failed(let why):
                 self.statusLine.stringValue = L("Bakılamadı: \(why)",
                                                 "Could not check: \(why)")

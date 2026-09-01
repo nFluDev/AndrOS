@@ -197,8 +197,8 @@ class MainActivity : AppCompatActivity() {
                 android.app.AlertDialog.Builder(this)
                     .setTitle("Yeni sürüm: ${r.version}")
                     .setMessage(r.notes.ifBlank { "Değişiklik notu yok." })
-                    .setPositiveButton("İndir") { _, _ ->
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url)))
+                    .setPositiveButton("İndir ve kur") { _, _ ->
+                        Installer.downloadAndInstall(this, r.url, r.version)
                     }
                     .setNegativeButton("Şimdi değil", null)
                     .show()
