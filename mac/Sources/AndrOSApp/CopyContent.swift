@@ -28,7 +28,15 @@ enum CopyContent {
                 DispatchQueue.main.async { onProgress?(L("Kopyalanıyor: \(it.name)", "Copying: \(it.name)")) }
                 let local = dir.appendingPathComponent(it.name)
                 try? FileManager.default.removeItem(at: local)
-                if data.pull(it.path, to: local.path) { urls.append(local) }
+                // Gecmiste gorunsun (bkz. TransferQueue.track).
+                let rec = TransferQueue.shared.track(name: it.name, remote: it.path,
+                                                     local: local.path, direction: .download)
+                let ok = data.pull(it.path, to: local.path) { got, total in
+                    guard total > 0 else { return }
+                    TransferQueue.shared.update(rec, progress: got * 100 / total)
+                }
+                TransferQueue.shared.finish(rec, ok: ok)
+                if ok { urls.append(local) }
             }
             DispatchQueue.main.async {
                 guard !urls.isEmpty else { onDone?(0); return }

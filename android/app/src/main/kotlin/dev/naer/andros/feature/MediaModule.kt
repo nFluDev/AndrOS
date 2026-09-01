@@ -77,6 +77,28 @@ class MediaModule(private val ctx: Context) {
         }
     }
 
+    /**
+     * Album kapagi.
+     *
+     * `albumId` uzerinden album sanatini okuyup JPEG olarak donuyor.
+     * adb yolunda bu dosya `content read` ile cekiliyordu; hata
+     * ayiklama kapaliyken kapaklar hic gelmiyordu.
+     */
+    fun albumArt(id: Int, albumId: Long, px: Int): JSONObject {
+        return try {
+            val uri = android.content.ContentUris.withAppendedId(
+                android.net.Uri.parse("content://media/external/audio/albumart"), albumId)
+            val bmp = ctx.contentResolver.loadThumbnail(uri, Size(px, px), null)
+            val bos = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 88, bos)
+            Reply.ok(id, JSONObject().put("jpeg",
+                android.util.Base64.encodeToString(bos.toByteArray(),
+                                                   android.util.Base64.NO_WRAP)))
+        } catch (e: Exception) {
+            Reply.err(id, "noart", e.message ?: "kapak yok")
+        }
+    }
+
     fun tracks(id: Int, limit: Int): JSONObject {
         val out = JSONArray()
         // MUTLAK yol (DATA) SART: Mac dosyayi indirirken bu yolu

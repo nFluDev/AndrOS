@@ -184,6 +184,22 @@ public extension AndroidData {
         }
     }
 
+    /// Album kapagi — ONCE UYGULAMA, sonra adb.
+    func albumArtPreferringApp(albumID: String, cacheDir: URL) -> URL? {
+        let local = cacheDir.appendingPathComponent("album-\(albumID).jpg")
+        if FileManager.default.fileExists(atPath: local.path) { return local }
+        if let b = companion, b.isReady, let n = Int(albumID), n > 0,
+           let d = b.call("music.artwork", ["albumId": n, "px": 512]),
+           let b64 = d["jpeg"] as? String,
+           let data = Data(base64Encoded: b64), data.count > 512 {
+            try? FileManager.default.createDirectory(at: cacheDir,
+                                                     withIntermediateDirectories: true)
+            try? data.write(to: local)
+            return local
+        }
+        return albumArt(albumID: albumID, cacheDir: cacheDir)
+    }
+
     /// Dosya listesi.
     func listPreferringApp(_ path: String) -> [FileEntry] {
         guard let b = companion, b.isReady else { return list(path) }

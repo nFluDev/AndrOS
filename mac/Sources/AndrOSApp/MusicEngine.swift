@@ -186,7 +186,20 @@ final class MusicEngine {
         }
     }
 
+    /// Akis oynaticisi (uzak URL icin). Yerel dosyalarda kullanilmiyor:
+    /// `AVAudioEngine` yolu ekolayzer ve ses efektlerini tasiyor.
+    private var streamPlayer: AVPlayer?
+    private var streamObserver: Any?
+    private var streamEnd: NSObjectProtocol?
+
     private func start(_ url: URL) {
+        // UZAK URL = AKIS. `AVAudioFile` yalniz yerel dosya okuyabiliyor;
+        // videolarda oldugu gibi burada da indirmeyi beklemiyoruz.
+        if !url.isFileURL {
+            startStream(url)
+            return
+        }
+        stopStream()
         do {
             let f = try AVAudioFile(forReading: url)
             file = f
@@ -225,6 +238,46 @@ final class MusicEngine {
         }
     }
 
+    private func startStream(_ url: URL) {
+        stopStream()
+        player.stop()
+        generation += 1
+        let gen = generation
+        let p = AVPlayer(url: url)
+        streamPlayer = p
+        streamObserver = p.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.25, preferredTimescale: 600),
+            queue: .main) { [weak self] _ in
+            guard let self, self.generation == gen else { return }
+            self.duration = p.currentItem?.duration.seconds.isFinite == true
+                ? p.currentItem!.duration.seconds : 0
+            self.onChange()
+        }
+        streamEnd = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem,
+            queue: .main) { [weak self] _ in
+            guard let self, self.generation == gen else { return }
+            self.trackFinished()
+        }
+        p.play()
+        isPlaying = true
+        isPaused = false
+        artwork = nil
+        onChange()
+    }
+
+    private func stopStream() {
+        if let o = streamObserver, let p = streamPlayer { p.removeTimeObserver(o) }
+        if let e = streamEnd { NotificationCenter.default.removeObserver(e) }
+        streamObserver = nil
+        streamEnd = nil
+        streamPlayer?.pause()
+        streamPlayer = nil
+    }
+
+    /// Akis mi caliyor?
+    private var streaming: Bool { streamPlayer != nil }
+
     static func artwork(of url: URL) -> NSImage? {
         let asset = AVURLAsset(url: url)
         for m in asset.commonMetadata where m.commonKey == .commonKeyArtwork {
@@ -254,6 +307,10 @@ final class MusicEngine {
     }
 
     var currentTime: TimeInterval {
+        if let p = streamPlayer {
+            let t = p.currentTime()
+            return t.isNumeric ? t.seconds : 0
+        }
         // Duraklatildiginda playerTime nil donuyor; son konumu veriyoruz.
         if isPaused { return pausedAt }
         guard let node = player.lastRenderTime,
@@ -275,6 +332,12 @@ final class MusicEngine {
     // MARK: - Denetimler
 
     func togglePlay() {
+        if let p = streamPlayer {
+            if p.rate > 0 { p.pause(); isPlaying = false; isPaused = true }
+            else { p.play(); isPlaying = true; isPaused = false }
+            onChange()
+            return
+        }
         guard file != nil else { return }
         if isPlaying {
             pausedAt = currentTime     // once oku, SONRA duraklat
@@ -319,6 +382,11 @@ final class MusicEngine {
     }
 
     func seek(to time: TimeInterval) {
+        if let p = streamPlayer {
+            p.seek(to: CMTime(seconds: max(0, time), preferredTimescale: 600))
+            onChange()
+            return
+        }
         guard let f = file else { return }
         let frame = AVAudioFramePosition(max(0, min(time, duration)) * sampleRate)
         let remaining = f.length - frame
@@ -342,6 +410,7 @@ final class MusicEngine {
     }
 
     func stop() {
+        stopStream()
         generation += 1        // bekleyen geri cagrilar yok sayilsin
         player.stop()
         isPlaying = false

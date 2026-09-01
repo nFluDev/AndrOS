@@ -249,11 +249,31 @@ final class MirroringPanel: NSViewController, AndrOSPanel,
             devices = list
         }
         startButton.isEnabled = !list.isEmpty && !mirroring
+        // NEDEN BOS oldugunu ACIKCA soyle.
+        //
+        // Yansitma scrcpy sunucusuyla calisiyor ve o sunucuyu cihazda
+        // baslatmanin tek yolu adb. Uygulama eslesmis olsa bile bu
+        // listede gorunmuyor — kullanici "her sey calisiyor ama burada
+        // telefon yok" diye sasiriyordu.
+        let pairedButNoADB = list.isEmpty && CompanionStore().paired().isEmpty == false
         note.stringValue = list.isEmpty
-            ? L("Cihaz yok. Telefonu USB ile bağla ve USB hata ayıklamayı aç.\n",
-              "No device. Attach the phone over USB and turn on USB debugging.\n")
-            + L("Wi-Fi cihazlar AndrOS mobil uygulaması ile listelenecek.", "Wi-Fi devices will be listed once the AndrOS mobile app is in place.")
-            : L("Wi-Fi üzerinden bağlanmak AndrOS mobil uygulaması ile mümkün olacak.", "Connecting over Wi-Fi becomes possible with the AndrOS mobile app.")
+            ? (pairedButNoADB
+               ? L("Telefon eşleşmiş ve bağlı — ama yansıtma için USB hata ayıklama "
+                 + "gerekiyor.\nGörüntü akışı scrcpy sunucusuyla çalışıyor ve onu "
+                 + "cihazda başlatmanın adb dışında bir yolu yok. Diğer her şey "
+                 + "(dosyalar, galeri, müzik, bildirimler, kamera, ses) adb olmadan "
+                 + "çalışır.",
+                   "The phone is paired and connected — but mirroring needs USB "
+                 + "debugging.\nThe video stream runs through the scrcpy server, and "
+                 + "there is no way to start it on the device without adb. Everything "
+                 + "else (files, gallery, music, notifications, camera, audio) works "
+                 + "without adb.")
+               : L("Cihaz yok. Telefonu USB ile bağla ve USB hata ayıklamayı aç.",
+                   "No device. Attach the phone over USB and turn on USB debugging."))
+            : L("Yansıtma adb üzerinden çalışıyor; diğer özellikler AndrOS "
+              + "uygulamasıyla, adb olmadan.",
+                "Mirroring runs over adb; the other features work through the "
+              + "AndrOS app without it.")
     }
 
     /// Yansitma ayri pencerede acildigi icin panel yalnizca DURUMU gosterir.

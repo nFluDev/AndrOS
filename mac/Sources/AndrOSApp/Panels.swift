@@ -402,7 +402,10 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
     func didAppear() {
         guard let d = data else { return }
         DispatchQueue.global().async { [weak self] in
-            let c = d.contacts()
+            // UYGULAMA yolu: `contacts()` yalniz adb kullaniyor ve hata
+            // ayiklama kapaliyken hep bos donuyordu — kisiler hic
+            // gelmiyordu.
+            let c = d.contactsPreferringApp()
             DispatchQueue.main.async {
                 self?.items = c
                 self?.filterChanged()

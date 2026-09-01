@@ -19,7 +19,7 @@ final class PlayerStatusItem {
     ///
     /// Tam ad menu cubugunun ucte birini yiyordu. Kisa bir pencere
     /// gosterip metni KAYDIRIYORUZ: yer kaplamadan tam ad okunuyor.
-    private let visibleChars = 12
+    private let visibleChars = 6
     private var scrollOffset = 0
     private var scrollTimer: Timer?
     private var fullTitle = ""

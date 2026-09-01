@@ -280,32 +280,31 @@ final class MusicPanel: NSViewController, AndrOSPanel,
         }
     }
 
+    /// Parcanin KAYNAGI.
+    ///
+    /// Once AKIS: telefondaki HTTP sunucusu byte-range destekliyor,
+    /// `AVPlayer` ilk saniyeler gelir gelmez basliyor — videolarda
+    /// oldugu gibi. Indirme yalnizca akis kurulamazsa; boylece 4 MB'lik
+    /// bir parcayi dinlemek icin once 4 MB beklemek gerekmiyor ve
+    /// diskte kopya birikmiyor.
     private func fetch(_ t: AndroidData.Track, _ done: @escaping (URL?) -> Void) {
         let local = MusicPanel.cacheDir.appendingPathComponent(MusicPanel.cacheName(t))
-        // Onbellek DISKTEN kontrol ediliyor: sozluk uygulama yeniden
-        // baslayinca bosaliyor ve ayni parca tekrar tekrar iniyordu.
+        // Onbellekte varsa oradan: en hizlisi.
         let size = ((try? FileManager.default
             .attributesOfItem(atPath: local.path)[.size]) as? Int) ?? 0
-        if size > 1024 {
-            cache[t.path] = local
-            done(local)
-            prefetchNext()
+        if size > 1024 { cache[t.path] = local; done(local); return }
+
+        guard let d = data else { done(nil); return }
+        if d.companion?.isReady == true, let url = d.streamURL(for: t.path) {
+            done(url)
             return
         }
-        guard data != nil else { done(nil); return }
+
+        // Akis yoksa indir (adb yolu ya da eski telefon uygulamasi).
         TransferQueue.shared.enqueue(name: t.title, remote: t.path,
                                      local: local.path, direction: .download) { [weak self] ok in
             DispatchQueue.main.async {
-                if ok {
-                    self?.cache[t.path] = local
-                    done(local)
-                    // ONDEN INDIRME yalniz BASARIDAN sonra: basarisizken
-                    // her denemede bir indirme daha eklemek, telefon
-                    // erisilemezken kuyrugu sisiriyordu.
-                    self?.prefetchNext()
-                } else {
-                    done(nil)
-                }
+                if ok { self?.cache[t.path] = local; done(local) } else { done(nil) }
             }
         }
     }
@@ -365,7 +364,7 @@ final class MusicPanel: NSViewController, AndrOSPanel,
               let d = data else { return }
         artLoading.insert(key)
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let img = d.albumArt(albumID: key, cacheDir: MusicPanel.artDir)
+            let img = d.albumArtPreferringApp(albumID: key, cacheDir: MusicPanel.artDir)
                 .flatMap { NSImage(contentsOf: $0) }
             DispatchQueue.main.async {
                 guard let self else { return }

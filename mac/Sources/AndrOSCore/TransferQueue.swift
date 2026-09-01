@@ -40,6 +40,32 @@ public final class TransferQueue {
     private var adbPath: String?
     private var serial: String?
 
+    /// KUYRUK DISINDA yurutulen bir aktarimi kaydeder.
+    ///
+    /// Surukle birak ve "panoya kopyala" isi kendileri yapiyor (surukleme
+    /// sozu anlik cevap istiyor, kuyruga girip beklemesi olmaz). Ama
+    /// kullanici acisindan bunlar da aktarim: geciste gorunmeliler.
+    @discardableResult
+    public func track(name: String, remote: String, local: String,
+                      direction: Direction) -> Item {
+        let it = Item(name: name, remote: remote, local: local, direction: direction)
+        it.state = .running
+        lock.lock(); items.append(it); lock.unlock()
+        notify()
+        return it
+    }
+
+    public func update(_ it: Item, progress: Int) {
+        it.progress = max(0, min(100, progress))
+        notify()
+    }
+
+    public func finish(_ it: Item, ok: Bool) {
+        it.state = ok ? .done : .failed
+        it.progress = ok ? 100 : it.progress
+        notify()
+    }
+
     public func configure(adbPath: String, serial: String?) {
         self.adbPath = adbPath
         self.serial = serial

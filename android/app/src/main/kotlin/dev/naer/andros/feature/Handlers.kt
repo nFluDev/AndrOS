@@ -69,6 +69,8 @@ class Handlers(private val ctx: Context) {
             "media.thumbnail"    -> media.thumbnail(id, a.optLong("mediaId"),
                                                     a.optBoolean("video"), a.optInt("px", 256))
             "music.tracks"       -> media.tracks(id, a.optInt("limit", 2000))
+            "music.artwork"      -> media.albumArt(id, a.optLong("albumId"),
+                                                   a.optInt("px", 512))
             // Dosyayi INDIRMEDEN oynatmak icin gecici bir HTTP adresi.
             "media.stream"       -> stream(id, a.optString("path"))
 

@@ -39,8 +39,16 @@ final class FilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
             completionHandler(CocoaError(.fileNoSuchFile)); return
         }
         onProgress?(e.name, true)
-        // adb pull dizinleri de ozyinelemeli kopyalar.
-        let ok = d.pull(e.path, to: url.path)
+        // AKTARIM GECMISINE de dussun: kullanici ne indirdigini
+        // gorebilmeli. Kayit once, indirme sonra — surukleme sirasinda
+        // serit hemen guncellensin.
+        let record = TransferQueue.shared.track(name: e.name, remote: e.path,
+                                                local: url.path, direction: .download)
+        let ok = d.pull(e.path, to: url.path) { got, total in
+            guard total > 0 else { return }
+            TransferQueue.shared.update(record, progress: got * 100 / total)
+        }
+        TransferQueue.shared.finish(record, ok: ok)
         onProgress?(e.name, false)
         completionHandler(ok ? nil : CocoaError(.fileWriteUnknown))
     }
