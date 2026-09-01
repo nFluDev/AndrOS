@@ -37,4 +37,7 @@
     <string name="swipe_hint">← mesaj · ara →</string>
     <string name="sec_network">ANDROS AĞI</string>
     <string name="network_note">Uçtan uca şifreli mesaj ve arama için kendi sunucun. Sunucu içeriği göremez; yalnızca iki cihazı tanıştırır. Boş bırakırsan ağ kapalı kalır.</string>
+    <string name="tab_chat">Sohbetler</string>
+    <string name="write_message">Mesaj yaz</string>
+    <string name="send">Gönder</string>
 </resources>

@@ -18,6 +18,8 @@
 
         <include layout="@layout/page_phone" />
 
+        <include layout="@layout/page_chat" />
+
         <include layout="@layout/page_control" />
     </FrameLayout>
 
@@ -55,6 +57,17 @@
                 android:src="@drawable/ic_phone"
                 android:contentDescription="@string/tab_phone" />
             <TextView style="@style/TabLabel" android:text="@string/tab_phone" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabChat"
+            style="@style/TabItem">
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_chat"
+                android:contentDescription="@string/tab_chat" />
+            <TextView style="@style/TabLabel" android:text="@string/tab_chat" />
         </LinearLayout>
 
         <LinearLayout

@@ -92,6 +92,11 @@ class PhonePage(
         contacts = loadContacts()
         renderContacts()
         showMatch()
+        // Kimler AndrOS aginda su an bagli? Yanit gelince liste
+        // kendiliginden tazeleniyor.
+        val hub = dev.naer.andros.call.Hub.get(activity)
+        hub.onPresence = { activity.runOnUiThread { renderContacts() } }
+        hub.checkReachable(contacts.map { it.number }.distinct().take(200))
     }
 
     private fun setMode(contactsMode: Boolean) {
@@ -292,7 +297,20 @@ class PhonePage(
             .inflate(R.layout.contact_row, contactList, false)
         v.findViewById<TextView>(R.id.rowName).text = r.name
         v.findViewById<TextView>(R.id.rowNumber).text = r.number
-        v.findViewById<TextView>(R.id.rowHint).setText(R.string.swipe_hint)
+        // AndrOS aginda BAGLI olan kisiyi isaretle: ucretsiz ve sifreli
+        // yolun kime acik oldugu gorunsun.
+        val hub = dev.naer.andros.call.Hub.get(activity)
+        val peer = hub.peerFor(r.number)
+        val online = peer != null && hub.reachable.values.contains(peer)
+        v.findViewById<TextView>(R.id.rowHint).apply {
+            if (online) {
+                text = "AndrOS"
+                setTextColor(activity.getColor(R.color.accent))
+            } else {
+                setText(R.string.swipe_hint)
+                setTextColor(activity.getColor(R.color.text_dim))
+            }
+        }
         // SOLA kaydir: mesaj · SAGA kaydir: ara. Mac tarafindaki
         // Aramalar/Kisiler panelleriyle ayni jest — iki uygulama ayni
         // dili konussun.

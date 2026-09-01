@@ -39,7 +39,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>        <string>dev.naer.andros</string>
     <key>CFBundleExecutable</key>        <string>AndrOS</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0-beta.12</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0-beta.13</string>
     <key>CFBundleVersion</key>           <string>1</string>
     <key>LSMinimumSystemVersion</key>    <string>13.0</string>
     <key>NSHighResolutionCapable</key>   <true/>

@@ -78,6 +78,21 @@ class AndrOSService : Service() {
         cl.start()
         camera = cl
         // Ekran yansitma: adb'siz yol (MediaProjection + erisilebilirlik).
+        // ANDROS AGI. Foreground hizmetten kuruluyor: gelen mesaj ve
+        // arama uygulamanin acik olmasini beklemesin.
+        runCatching {
+            val hub = dev.naer.andros.call.Hub.get(this)
+            hub.onMessage = { from, text, _ ->
+                android.util.Log.i("AndrOS", "AndrOS mesaji [$from]: ${text.take(40)}")
+                notifyMessage(from, text)
+            }
+            hub.start()
+            // KENDI NUMARAMIZI BILDIR. Bunu yapmayan cihazi kimse
+            // numarayla bulamaz — yalniz kimligi bilenler yazabilir.
+            val mine = ownNumber()
+            if (mine.isNotBlank()) hub.announce(listOf(mine))
+        }.onFailure { android.util.Log.w("AndrOS", "ag kurulamadi: ${it.message}") }
+
         val sl = ScreenLink(this, identity)
         sl.onNeedProjection = { askForProjection() }
         sl.onProjectionLost = {
@@ -271,6 +286,50 @@ class AndrOSService : Service() {
         }
     }
 
+    /**
+     * Gelen AndrOS mesaji icin bildirim.
+     *
+     * SMS'ten AYIRT EDILEBILIR olmali: ikisi ayni yerden gelmiyor ve
+     * kullanicinin hangisine baktigini bilmesi gerekiyor.
+     */
+    /// Telefonun kendi numarasi. Operator SIM'e yazmamissa bos doner
+    /// ve o zaman bu cihaz numarayla bulunamaz — kimlikle bulunur.
+    private fun ownNumber(): String = runCatching {
+        val sm = getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE)
+            as android.telephony.SubscriptionManager
+        @Suppress("MissingPermission")
+        sm.activeSubscriptionInfoList?.firstOrNull { !it.number.isNullOrBlank() }?.number
+            ?: run {
+                val tm = getSystemService(TELEPHONY_SERVICE)
+                    as android.telephony.TelephonyManager
+                @Suppress("MissingPermission", "DEPRECATION")
+                tm.line1Number ?: ""
+            }
+    }.getOrDefault("")
+
+    private fun notifyMessage(from: String, text: String) {
+        val hub = dev.naer.andros.call.Hub.get(this)
+        val who = hub.store.number(from) ?: from
+        val i = Intent(this, MainActivity::class.java)
+            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra("openChat", from)
+        val pi = PendingIntent.getActivity(this, from.hashCode(), i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("AndrOS · $who")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this)
+                .notify(NOTIF_MESSAGE + (from.hashCode() and 0xFF), n)
+        }
+    }
+
     companion object {
         const val ACTION_DISCONNECT = "dev.naer.andros.DISCONNECT"
         const val ACTION_UNPAIR = "dev.naer.andros.UNPAIR"
@@ -300,6 +359,7 @@ class AndrOSService : Service() {
         private const val CHANNEL_QUIET = "andros.connection.quiet"
         private const val NOTIF_ID = 1
         private const val NOTIF_CAPTURE = 2
+        private const val NOTIF_MESSAGE = 1000
         @Volatile var running = false
             private set
 

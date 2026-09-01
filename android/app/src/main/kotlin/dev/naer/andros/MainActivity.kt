@@ -52,11 +52,14 @@ class MainActivity : AppCompatActivity() {
     private val tabs by lazy {
         listOf(findViewById<LinearLayout>(R.id.tabHome),
                findViewById<LinearLayout>(R.id.tabPhone),
+               findViewById<LinearLayout>(R.id.tabChat),
                findViewById<LinearLayout>(R.id.tabControl),
                findViewById<LinearLayout>(R.id.tabSettings))
     }
     private lateinit var pagePhone: android.view.View
     private var phonePage: PhonePage? = null
+    private lateinit var pageChat: android.view.View
+    private var chatPage: ChatPage? = null
 
     /// Kamerayla QR okuma UYGULAMANIN ICINDE: kullanicinin telefonunda
     /// kamera uygulamasi QR okumuyor, dolayisiyla derin baglantiya
@@ -145,6 +148,7 @@ class MainActivity : AppCompatActivity() {
         maybeCheckForUpdate()
         handlePairUri(intent?.data)
         maybeRequestCapture(intent)
+        intent?.getStringExtra("openChat")?.let { showTab(2); chatPage?.open(it) }
     }
 
     /**
@@ -174,6 +178,7 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         maybeRequestCapture(intent)
+        intent.getStringExtra("openChat")?.let { showTab(2); chatPage?.open(it) }
         handlePairUri(intent.data)
     }
 
@@ -250,6 +255,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupTabs() {
         pageHome = findViewById(R.id.pageHome)
         pagePhone = findViewById(R.id.pagePhone)
+        pageChat = findViewById(R.id.pageChat)
+        chatPage = ChatPage(this, pageChat)
         pageControl = findViewById(R.id.pageControl)
         phonePage = PhonePage(this, pagePhone) { done ->
             onContactScan = done
@@ -307,14 +314,16 @@ class MainActivity : AppCompatActivity() {
         tabs[0].setOnClickListener { showTab(0) }
         tabs[1].setOnClickListener { showTab(1) }
         tabs[2].setOnClickListener { showTab(2) }
-        tabs[3].setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        tabs[3].setOnClickListener { showTab(3) }
+        tabs[4].setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
         showTab(0)
     }
 
     private fun showTab(i: Int) {
         pageHome.visibility = if (i == 0) android.view.View.VISIBLE else android.view.View.GONE
         pagePhone.visibility = if (i == 1) android.view.View.VISIBLE else android.view.View.GONE
-        pageControl.visibility = if (i == 2) android.view.View.VISIBLE else android.view.View.GONE
+        pageChat.visibility = if (i == 2) android.view.View.VISIBLE else android.view.View.GONE
+        pageControl.visibility = if (i == 3) android.view.View.VISIBLE else android.view.View.GONE
         for ((k, t) in tabs.withIndex()) {
             val active = k == i
             val color = getColor(if (active) R.color.accent else R.color.text_dim)
@@ -322,7 +331,8 @@ class MainActivity : AppCompatActivity() {
             (t.getChildAt(1) as TextView).setTextColor(color)
         }
         if (i == 1) phonePage?.refresh()
-        if (i == 2) refreshControlStatus() else hideKeyboard()
+        if (i == 2) chatPage?.refresh()
+        if (i == 3) refreshControlStatus() else hideKeyboard()
     }
 
     private fun refreshControlStatus() {
