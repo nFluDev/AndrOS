@@ -198,8 +198,12 @@ public final class ScreenBridge {
                         if inputReady { Log.write("yansıtma: erişilebilirlik kapalı") }
                         inputReady = false
                         DispatchQueue.main.async { self.onInputReady?(false) }
-                    case "nowritesettings":
-                        Log.write("yansıtma: sistem ayarlarını yazma izni yok")
+                    case "nowritesettings", "locked":
+                        // OLUMCUL DEGIL. "locked" yayini bitirmiyor:
+                        // ekran acildi, yalniz kilit ekraninin sifre
+                        // alani yakalanamiyor. Bunu hata sayip yayini
+                        // kapatmak, calisan bir seyi kapatmak olurdu.
+                        Log.write("yansıtma uyarısı: \(e)")
                         // Metni ARAYUZ yaziyor: cekirdek iki dilli
                         // dizeleri tutmuyor, yalnizca kodu geciyor.
                         DispatchQueue.main.async { self.onNotice?(e) }

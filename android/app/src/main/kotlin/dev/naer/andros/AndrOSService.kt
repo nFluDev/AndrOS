@@ -80,6 +80,11 @@ class AndrOSService : Service() {
         // Ekran yansitma: adb'siz yol (MediaProjection + erisilebilirlik).
         val sl = ScreenLink(this, identity)
         sl.onNeedProjection = { askForProjection() }
+        sl.onProjectionLost = {
+            capturingAudio = false
+            audio?.setProjection(null)
+            notify(buildNotification())
+        }
         sl.start()
         screen = sl
 

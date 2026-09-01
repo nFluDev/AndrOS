@@ -363,6 +363,12 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
     var data: AndroidData?
     private var items: [AndroidData.Contact] = []
     private var filtered: [AndroidData.Contact] = []
+    /// "Bu telefon" — telefonun kendi sahibi. Rehberde en ustte AYRI
+    /// duruyor, telefon da boyle gosteriyor.
+    private var owner: AndroidData.Contact?
+    /// Kendi numaran ekranda ACIK durmasin: seri numarasi ve IP ile ayni
+    /// kural. Tiklayinca panoya gidiyor.
+    private var ownerRevealed = false
     private let table = NSTableView()
     private let search = SearchToggle()
 
@@ -406,7 +412,9 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
             // ayiklama kapaliyken hep bos donuyordu — kisiler hic
             // gelmiyordu.
             let c = d.contactsPreferringApp()
+            let me = AndroidData.phoneOwner
             DispatchQueue.main.async {
+                self?.owner = me
                 self?.items = c
                 self?.filterChanged()
             }
@@ -498,15 +506,25 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
         NSPasteboard.general.setString(v, forType: .string)
     }
 
-    func numberOfRows(in t: NSTableView) -> Int { filtered.count }
+    /// Sahip satiri yalniz ARAMA BOSKEN gosteriliyor: suzgecte
+    /// gorunmesi listeyi yaniltiyor.
+    private var showsOwner: Bool {
+        owner != nil && search.text.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    func numberOfRows(in t: NSTableView) -> Int {
+        filtered.count + (showsOwner ? 1 : 0)
+    }
 
     func tableView(_ t: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         DeviceRowView()
     }
 
     func tableView(_ t: NSTableView, viewFor col: NSTableColumn?, row: Int) -> NSView? {
-        guard row < filtered.count else { return nil }
-        let c = filtered[row]
+        if showsOwner, row == 0 { return ownerRow() }
+        let index = row - (showsOwner ? 1 : 0)
+        guard index < filtered.count else { return nil }
+        let c = filtered[index]
         let name = NSTextField(labelWithString: c.name)
         name.font = .systemFont(ofSize: 13, weight: .medium)
         let num = NSTextField(labelWithString: c.number)
@@ -535,6 +553,59 @@ final class ContactsPanel: NSViewController, AndrOSPanel, NSTableViewDataSource,
             NotificationCenter.default.post(name: .androsOpenConversation, object: c.number)
         }
         return r
+    }
+
+    /// "Bu telefon" satiri.
+    ///
+    /// Numara MASKELI duruyor — seri numarasi ve IP ile ayni kural:
+    /// ekran paylasirken ya da yanindaki biri varken kendi numaran goze
+    /// carpmasin. Tiklayinca panoya kopyalaniyor, ⌥ ile de gorunuyor.
+    private func ownerRow() -> NSView {
+        guard let c = owner else { return NSView() }
+        let title = NSTextField(labelWithString:
+            c.name.isEmpty ? L("Bu telefon", "This phone") : c.name)
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let shown = c.number.isEmpty
+            ? L("numara yok", "no number")
+            : (ownerRevealed ? c.number : Privacy.mask(c.number))
+        let num = NSTextField(labelWithString: shown)
+        num.font = .systemFont(ofSize: 11)
+        num.textColor = .secondaryLabelColor
+
+        let badge = NSTextField(labelWithString: L("BU TELEFON", "THIS PHONE"))
+        badge.font = .systemFont(ofSize: 9, weight: .semibold)
+        badge.textColor = .controlAccentColor
+
+        let avatar = AvatarView()
+        avatar.initial = String((c.name.isEmpty ? "?" : c.name).prefix(1)).uppercased()
+        avatar.seed = 0
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatar.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        avatar.heightAnchor.constraint(equalToConstant: 30).isActive = true
+
+        let texts = NSStackView(views: [title, num, badge])
+        texts.orientation = .vertical
+        texts.alignment = .leading
+        texts.spacing = 1
+
+        let row = ClickableRow(views: [avatar, texts])
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        row.toolTip = L("Tıkla: numarayı panoya kopyala · ⌥ tıkla: göster",
+                        "Click: copy the number · ⌥ click: reveal")
+        row.onClick = { [weak self] alt in
+            guard let self, !c.number.isEmpty else { return }
+            if alt {
+                self.ownerRevealed.toggle()
+                self.table.reloadData()
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(c.number, forType: .string)
+            }
+        }
+        return row
     }
 
     /// Telefonda aramayi baslatir (Aramalar panelindeki yolun ayni).

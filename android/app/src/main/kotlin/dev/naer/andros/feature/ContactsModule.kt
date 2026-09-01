@@ -45,6 +45,63 @@ class ContactsModule(private val ctx: Context) {
                     n++
                 }
             }
-        return Reply.ok(id, JSONObject().put("contacts", out))
+        return Reply.ok(id, JSONObject().put("contacts", out).put("me", me()))
+    }
+
+    /**
+     * "Bu telefon": kullanicinin KENDI adi ve numarasi.
+     *
+     * Telefonun rehberi bunu en ustte ayri gosteriyor, biz de
+     * gosterelim. Tek bir kaynak yok, uc yere birden bakiyoruz:
+     *   1. Rehberdeki "Ben" profili — ad ve numara icin en dogrusu,
+     *      ama cogu telefonda bos.
+     *   2. SIM kartin kayitli numarasi — operator yazmissa dolu, cok
+     *      SIM'li telefonlarda ilki.
+     *   3. Eski `line1Number` — genelde bos doner, yine de deneriz.
+     * Hicbiri yoksa `null` doneriz; Mac o zaman satiri hic gostermiyor.
+     * Numara BULUNAMAMASI normal: Turkiye'de operatorlerin cogu SIM'e
+     * numara yazmiyor.
+     */
+    private fun me(): Any {
+        var name = ""
+        var number = ""
+
+        runCatching {
+            ctx.contentResolver.query(
+                ContactsContract.Profile.CONTENT_URI,
+                arrayOf(ContactsContract.Profile.DISPLAY_NAME), null, null, null)
+                ?.use { if (it.moveToFirst()) name = it.getString(0) ?: "" }
+        }
+        runCatching {
+            val uri = android.net.Uri.withAppendedPath(
+                ContactsContract.Profile.CONTENT_URI,
+                ContactsContract.Contacts.Data.CONTENT_DIRECTORY)
+            ctx.contentResolver.query(uri,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                "${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE), null)
+                ?.use { if (it.moveToFirst()) number = it.getString(0) ?: "" }
+        }
+
+        if (number.isBlank()) runCatching {
+            val sm = ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
+                as android.telephony.SubscriptionManager
+            @Suppress("MissingPermission")
+            val list = sm.activeSubscriptionInfoList
+            val sub = list?.firstOrNull { !it.number.isNullOrBlank() }
+            if (sub != null) {
+                number = sub.number ?: ""
+                if (name.isBlank()) name = sub.displayName?.toString() ?: ""
+            }
+        }
+        if (number.isBlank()) runCatching {
+            val tm = ctx.getSystemService(Context.TELEPHONY_SERVICE)
+                as android.telephony.TelephonyManager
+            @Suppress("MissingPermission", "DEPRECATION")
+            number = tm.line1Number ?: ""
+        }
+
+        if (name.isBlank() && number.isBlank()) return JSONObject.NULL
+        return JSONObject().put("name", name).put("number", number.replace(" ", ""))
     }
 }

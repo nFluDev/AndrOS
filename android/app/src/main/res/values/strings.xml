@@ -18,7 +18,7 @@
     <string name="right_click">Sağ tık</string>
     <string name="keyboard">Klavye</string>
     <string name="keyboard_hint">Yaz — harfler Mac’e gider</string>
-    <string name="control_hint">Sürükle: imleç · Dokun: sol tık · İki parmakla dokun: sağ tık · İki parmakla sürükle: kaydırma · Üç parmak sağ/sol: masaüstü değiştir · Üç parmak yukarı: Mission Control · Üç parmak aşağı: geri</string>
+    <string name="control_hint">Sürükle: imleç · Dokun: sol tık · İki parmakla dokun: sağ tık · İki parmakla sürükle: kaydırma (yukarı/aşağı ve sağa/sola) · Dokun-sürükle: basılı taşıma. Masaüstü ve Mission Control yukarıdaki düğmelerde — Android üç parmak hareketlerini kendi kullanıyor.</string>
     <string name="control_ready">Mac bağlı</string>
     <string name="control_offline">Mac bağlı değil</string>
 </resources>

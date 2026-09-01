@@ -64,6 +64,19 @@ class InputService : AccessibilityService() {
         stroke(points, durationMs)
     }
 
+    /**
+     * Hareketler SIRAYA giriyor.
+     *
+     * `dispatchGesture` onceki hareket surerken `false` donuyor ve
+     * hicbir sey yapmiyor — sessizce. Hizli hareket ederken dokunmalarin
+     * bir kismi bu yuzden kayboluyor, kumanda "arada bozuluyor"
+     * gorunuyordu. Kucuk bir kuyruk (en fazla 8) bunu kapatiyor;
+     * dolarsa EN ESKISI dusuyor, cunku gec kalmis bir dokunma zaten
+     * yanlis yere gider.
+     */
+    private val pending = java.util.ArrayDeque<GestureDescription>()
+    private var busy = false
+
     private fun stroke(points: List<Pair<Float, Float>>, durationMs: Long) {
         if (points.isEmpty()) return
         val path = Path()
@@ -74,8 +87,33 @@ class InputService : AccessibilityService() {
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceAtLeast(1)))
             .build()
-        runCatching { dispatchGesture(gesture, null, null) }
-            .onFailure { Log.w(TAG, "hareket gonderilemedi: ${it.message}") }
+        synchronized(pending) {
+            pending.addLast(gesture)
+            while (pending.size > 8) pending.removeFirst()
+        }
+        pump()
+    }
+
+    private fun pump() {
+        val next = synchronized(pending) {
+            if (busy) return
+            val g = pending.pollFirst() ?: return
+            busy = true
+            g
+        }
+        val done = object : GestureResultCallback() {
+            override fun onCompleted(d: GestureDescription?) { finish() }
+            override fun onCancelled(d: GestureDescription?) { finish() }
+            private fun finish() {
+                synchronized(pending) { busy = false }
+                pump()
+            }
+        }
+        val ok = runCatching { dispatchGesture(next, done, null) }.getOrDefault(false)
+        if (!ok) {
+            Log.w(TAG, "hareket gonderilemedi")
+            synchronized(pending) { busy = false }
+        }
     }
 
     // MARK: - Sistem dugmeleri

@@ -50,10 +50,24 @@ public extension AndroidData {
     /// bos liste yerine NE OLDUGUNU gosterebilsin diye.
     static var lastFailure: String?
 
+    /// Telefonun KENDI sahibi ("Bu telefon"). Rehberde en ustte ayri
+    /// duruyor; telefon da boyle gosteriyor.
+    public static var phoneOwner: Contact?
+
     func contactsPreferringApp() -> [Contact] {
         guard let b = companion, b.isReady else {
             Self.lastFailure = "notconnected"
             return contacts()
+        }
+        // "Bu telefon" satiri ayni yanitta geliyor; ayri istek acmak
+        // bosuna gidis-donus olurdu.
+        if let d = b.call("contacts.list", ["limit": 2000]) {
+            if let me = d["me"] as? [String: Any] {
+                Self.phoneOwner = Contact(name: me["name"] as? String ?? "",
+                                          number: me["number"] as? String ?? "")
+            } else {
+                Self.phoneOwner = nil
+            }
         }
         let rows = b.array("contacts.list", "contacts", ["limit": 2000])
         guard !rows.isEmpty else {

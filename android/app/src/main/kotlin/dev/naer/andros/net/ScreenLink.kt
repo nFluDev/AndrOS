@@ -48,8 +48,13 @@ class ScreenLink(
     @Volatile private var surface: Surface? = null
     @Volatile private var out: DataOutputStream? = null
     @Volatile private var running = false
+    /// Kacinci baglanti. Eskiyen baglantinin temizligi yenisini
+    /// vurmasin diye.
+    @Volatile private var sessionSeq = 0L
     /// Ekran izni yok: hizmet kullaniciya bildirim dussun.
     var onNeedProjection: (() -> Unit)? = null
+    /// Izin ELDEN GITTI: hizmet durumunu guncellesin.
+    var onProjectionLost: (() -> Unit)? = null
 
     private var width = 0
     private var height = 0
@@ -77,9 +82,21 @@ class ScreenLink(
                 val s = try { ss.accept() } catch (e: Exception) { break }
                 runCatching { s.tcpNoDelay = true; s.soTimeout = 15_000 }
                 thread(isDaemon = true, name = "andros-screen") {
-                    try { serve(s) }
+                    val mine = ++sessionSeq
+                    try { serve(s, mine) }
                     catch (e: Throwable) { Log.d(TAG, "ekran baglantisi bitti: ${e.message}") }
-                    finally { runCatching { s.close() }; stopCapture() }
+                    finally {
+                        runCatching { s.close() }
+                        // YALNIZ KENDI oturumunu kapat.
+                        //
+                        // Olculen dongu: Mac koptugunda yeniden
+                        // baglaniyor, yeni baglanti yakalamayi baslatiyor,
+                        // sonra ESKI baglantinin `finally`si calisip onu
+                        // olduruyordu. Sonuc: saniyede bir "baglandi /
+                        // koptu". Artik kapatan, o sirada gecerli olan
+                        // oturum degilse hicbir sey yapmiyor.
+                        if (sessionSeq == mine) stopCapture()
+                    }
                 }
             }
         }
@@ -107,13 +124,22 @@ class ScreenLink(
         // telefondan durdurunca haberimiz olsun.
         p?.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
-                Log.i(TAG, "ekran paylasimi telefondan durduruldu")
+                // Izin OLDU. Sistem bunu kendi de yapabiliyor (baska bir
+                // uygulama yakalamaya baslayinca, ya da ColorOS arka
+                // plandaki paylasimi kesince — oyun acinca olan buydu).
+                // Referansi BIRAKMAK sart: olu bir izinle sanal ekran
+                // acmaya calismak, Mac'i sonsuz yeniden baglanma
+                // dongusune sokuyordu.
+                Log.i(TAG, "ekran paylasimi sona erdi")
+                projection = null
                 stopCapture()
+                onProjectionLost?.invoke()
+                sendError("noprojection")
             }
         }, android.os.Handler(android.os.Looper.getMainLooper()))
     }
 
-    private fun serve(sock: java.net.Socket) {
+    private fun serve(sock: java.net.Socket, session: Long) {
         val input = DataInputStream(BufferedInputStream(sock.getInputStream()))
         val o = DataOutputStream(BufferedOutputStream(sock.getOutputStream(), 1 shl 16))
         sock.soTimeout = 0
@@ -151,11 +177,39 @@ class ScreenLink(
 
     // MARK: - Goruntu
 
+    /**
+     * Telefonun ekranini UYANDIRIR.
+     *
+     * Ekran kapaliyken yakalama bos kaliyor ve kullanicinin telefonu
+     * eline alip acmasi gerekiyordu — "uzaktan kullanma"nin butun
+     * anlamini kaciran bir durum. `ACQUIRE_CAUSES_WAKEUP` eski bir yol
+     * ve dokumanda "kullanmayin" yaziyor, ama adb'siz ekrani acmanin
+     * baska yolu yok: yeni yol (`setTurnScreenOn`) bir ETKINLIK
+     * gerektiriyor ve arka plandan etkinlik acmak Android 10'dan beri
+     * yasak.
+     *
+     * KILIDI ACAMIYORUZ. Ekran acilir, kilit ekrani gelir; sifre alani
+     * Android'in guvenlik kurali geregi yakalanamiyor.
+     */
+    private fun wakeScreen() {
+        val pm = ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (pm.isInteractive) return
+        runCatching {
+            @Suppress("DEPRECATION")
+            val wl = pm.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP, "AndrOS:wake")
+            wl.acquire(3000)
+            Log.i(TAG, "ekran uyandirildi")
+        }
+    }
+
     private fun startCapture() {
         // Zaten calisiyorsa YENIDEN KUR, sessizce cikma. Baglanti
         // koptugunda eski yakalama bir sure daha ayakta kalabiliyor;
         // erken donmek yeni istemciye hic kare gitmemesi demekti.
         if (running) stopCapture()
+        wakeScreen()
         val proj = projection ?: run {
             sendError("noprojection")
             // Kullanicinin uygulamayi acip izni aramasini beklemek yerine
@@ -209,11 +263,30 @@ class ScreenLink(
         surface = surf
         running = true
 
-        display = proj.createVirtualDisplay(
-            "AndrOS", width, height, metrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surf, null, null)
+        display = try {
+            proj.createVirtualDisplay(
+                "AndrOS", width, height, metrics.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surf, null, null)
+        } catch (e: Throwable) {
+            // Olu izinle sanal ekran acilmiyor. Sessizce birakmak yerine
+            // izni birakip kullanicidan yenisini istiyoruz — yoksa
+            // karsi taraf bos ekrana bakip duruyor.
+            Log.w(TAG, "sanal ekran acilamadi: ${e.message}")
+            projection = null
+            stopCapture()
+            sendError("noprojection")
+            onProjectionLost?.invoke()
+            onNeedProjection?.invoke()
+            return
+        }
 
         sendMeta()
+        // KILITLIYSE hemen soyle. Kilit ekrani Android'in guvenlik
+        // kurali geregi yakalanamiyor; Mac'in siyah ekrani sessizce
+        // gostermesi "bozuk" demekti.
+        val km = ctx.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+        wasLocked = km.isKeyguardLocked
+        if (wasLocked) sendError("locked")
         thread(isDaemon = true, name = "andros-screen-drain") { drain(enc) }
         watchRotation()
         Log.i(TAG, "ekran yakalaniyor: ${width}x$height (donus $rotation)")

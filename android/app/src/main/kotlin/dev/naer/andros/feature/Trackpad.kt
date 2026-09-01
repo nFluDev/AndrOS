@@ -21,8 +21,12 @@ import kotlin.math.hypot
  *  • iki parmak dokunma    → sag tik
  *  • iki parmak surukleme  → kaydirma
  *  • dokun-ve-surukle      → dugme basili surukleme (secme, tasima)
- *  • uc parmak sag/sol     → sanal masaustu degistir
- *  • uc parmak yukari/asagi→ Mission Control / geri
+ *
+ * UC PARMAK YOK. Denendi ve geri alindi: Android uc parmak
+ * hareketlerini kendi kapiyor (ColorOS'ta ekran goruntusu ve bolunmus
+ * ekran), bize ya hic gelmiyor ya da uygulamayi ikiye bolerek geliyordu.
+ * Masaustu gecisi ve Mission Control artik DUGMELERDE — dugmeyi sistem
+ * elimizden alamiyor.
  *
  * Imlec KONUMU degil FARKI gonderiliyor: telefon ekraniyla Mac ekrani
  * ayni sekilde degil ve mutlak esleme dokunmatik ekran gibi davranirdi;
@@ -53,7 +57,6 @@ class TrackpadView @JvmOverloads constructor(
     private var maxPointers = 0
     private var moved = false
     private var dragging = false
-    private var gestureSent = false
     private var lastTapAt = 0L
 
     // Parmak izi halkalari: dokunulan yer gorunur olsun.
@@ -71,7 +74,6 @@ class TrackpadView @JvmOverloads constructor(
                 downAt = System.currentTimeMillis()
                 maxPointers = 1
                 moved = false
-                gestureSent = false
                 // Dokun-ve-surukle: onceki dokunustan hemen sonra basip
                 // surukleme "tut ve tasi" demek — Mac trackpad'inde de
                 // boyle. Dugmeyi SIMDI basili tutuyoruz.
@@ -89,8 +91,13 @@ class TrackpadView @JvmOverloads constructor(
             MotionEvent.ACTION_MOVE -> {
                 maxPointers = maxOf(maxPointers, e.pointerCount)
                 when {
-                    e.pointerCount >= 3 -> threeFinger(e)
-                    e.pointerCount == 2 -> {
+                    // UC PARMAK ARTIK YOK. Android'in kendisi uc parmak
+                    // hareketlerini kapiyor (ColorOS'ta ekran goruntusu ve
+                    // bolunmus ekran); bize ya hic gelmiyor ya da yarim
+                    // geliyordu, ustelik uygulamayi ikiye bolerek. Mission
+                    // Control ve masaustu gecisi artik ALTTAKI DUGMELERDE
+                    // — dugme sistemin elinden alinamiyor.
+                    e.pointerCount >= 2 -> {
                         val dx = e.x - lastScrollX
                         val dy = e.y - lastScrollY
                         if (abs(dx) > 0.5f || abs(dy) > 0.5f) {
@@ -113,13 +120,12 @@ class TrackpadView @JvmOverloads constructor(
                     }
                 }
             }
-
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val held = System.currentTimeMillis() - downAt
                 if (dragging) {
                     dragging = false
                     send(JSONObject().put("t", "up"))
-                } else if (!moved && !gestureSent && held < tapTimeout * 3) {
+                } else if (!moved && held < tapTimeout * 3) {
                     // Kac parmakla DOKUNULDUGU tikin turunu belirliyor.
                     when (maxPointers) {
                         1 -> { send(JSONObject().put("t", "click").put("b", "left"))
@@ -139,25 +145,6 @@ class TrackpadView @JvmOverloads constructor(
         return true
     }
 
-    /// Uc parmak: jest BIR KEZ atesleniyor. Aksi halde tek bir kaydirma
-    /// sirasinda onlarca masaustu degistirirdi.
-    private fun threeFinger(e: MotionEvent) {
-        if (gestureSent) return
-        val dx = e.x - downX
-        val dy = e.y - downY
-        val threshold = touchSlop * 4
-        val g = when {
-            abs(dx) > abs(dy) && dx > threshold  -> "desktopLeft"
-            abs(dx) > abs(dy) && dx < -threshold -> "desktopRight"
-            abs(dy) > abs(dx) && dy < -threshold -> "missionControl"
-            abs(dy) > abs(dx) && dy > threshold  -> "back"
-            else -> null
-        } ?: return
-        gestureSent = true
-        moved = true
-        send(JSONObject().put("t", "gesture").put("g", g))
-    }
-
     private fun send(o: JSONObject) { onEvent?.invoke(o) }
 
     override fun onDraw(canvas: Canvas) {
@@ -169,5 +156,7 @@ class TrackpadView @JvmOverloads constructor(
     fun click(right: Boolean) =
         send(JSONObject().put("t", "click").put("b", if (right) "right" else "left"))
     fun text(s: String) = send(JSONObject().put("t", "text").put("s", s))
+    /// Masaustu gecisi / Mission Control — dugmelerden.
+    fun gesture(name: String) = send(JSONObject().put("t", "gesture").put("g", name))
     fun key(k: String) = send(JSONObject().put("t", "key").put("k", k))
 }

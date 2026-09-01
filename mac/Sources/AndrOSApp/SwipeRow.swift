@@ -116,3 +116,15 @@ final class SwipeRow: NSStackView {
         }
     }
 }
+
+/// Tiklanabilir satir. `alt` = ⌥ basiliydi.
+///
+/// Neden ayri bir sinif: `SwipeRow` kaydirma jestini yakaliyor ve
+/// tiklamayi ona eklemek kaydirmayi yanlislikla tik saydiriyordu.
+final class ClickableRow: NSStackView {
+    var onClick: ((Bool) -> Void)?
+
+    override func mouseDown(with e: NSEvent) {
+        onClick?(e.modifierFlags.contains(.option))
+    }
+}

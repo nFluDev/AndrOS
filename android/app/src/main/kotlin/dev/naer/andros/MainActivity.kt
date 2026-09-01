@@ -247,6 +247,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.leftClick).setOnClickListener { trackpad.click(false) }
         findViewById<Button>(R.id.rightClick).setOnClickListener { trackpad.click(true) }
         findViewById<Button>(R.id.keyboardButton).setOnClickListener { toggleKeyboard() }
+        // Masaustu / Mission Control DUGMELERDE: uc parmak hareketini
+        // Android'in kendisi kapiyor, bize ulasmiyor.
+        findViewById<Button>(R.id.deskLeft).setOnClickListener { trackpad.gesture("desktopLeft") }
+        findViewById<Button>(R.id.deskRight).setOnClickListener { trackpad.gesture("desktopRight") }
+        findViewById<Button>(R.id.missionControl).setOnClickListener {
+            trackpad.gesture("missionControl")
+        }
 
         // Yazilan her harf ANINDA Mac'e gidiyor; kutu birikmiyor.
         // "Gonder" dugmesi beklemek yaziyi gecikmeli hissettiriyordu.
@@ -383,6 +390,12 @@ class MainActivity : AppCompatActivity() {
                 val mgr = getSystemService(android.media.projection.MediaProjectionManager::class.java)
                 projectionRequest.launch(mgr.createScreenCaptureIntent())
             }
+        }
+        // Ekran karartma ve otomatik donme bu izne bagli. Olmayinca
+        // Mac'te dugmeye basiliyor ama hicbir sey olmuyordu.
+        row("Sistem ayarlarını değiştir", Settings.System.canWrite(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                                 Uri.parse("package:$packageName")))
         }
         // Mac'ten telefona DOKUNMAK icin erisilebilirlik sart. Bu, adb
         // olmadan baska bir uygulamaya dokunmanin tek desteklenen yolu:

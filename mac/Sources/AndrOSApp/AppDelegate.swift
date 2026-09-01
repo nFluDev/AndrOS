@@ -1017,7 +1017,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 self.appReconnects = 0
                 self.mirrorNotice = ""
                 self.content?.status.hide()
-            case .failed(let why): self.explainMirrorFailure(why)
+            case .failed(let why):
+                // Yeniden baglanma DENEMESIN: izin yokken denemek
+                // ekrani saniyede bir "baglandi/koptu" diye yakip
+                // sondurmustu. Kullanici izni verip yeniden baslatir.
+                self.appMirrorTarget = nil
+                self.explainMirrorFailure(why)
             case .off:             self.appMirrorDropped()
             }
         }
@@ -1041,11 +1046,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// geri gelsin.
     private func appMirrorDropped() {
         guard mirrorViaApp, window?.isVisible == true,
-              let t = appMirrorTarget, appReconnects < 20 else { return }
+              let t = appMirrorTarget, appReconnects < 12 else {
+            if mirrorViaApp, appReconnects >= 12 {
+                showMirrorNotice(L("Bağlantı kurulamıyor. Telefonda AndrOS açık mı?",
+                                   "Cannot connect. Is AndrOS running on the phone?"))
+            }
+            return
+        }
         appReconnects += 1
-        showMirrorNotice(L("Bağlantı koptu — yeniden bağlanılıyor…",
-                           "Connection dropped — reconnecting…"))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        // GERI CEKILME. Sabit iki saniyede denemek, telefon izni
+        // yenilerken ekrani "baglandi / koptu" diye yanip sondurmustu.
+        // Her denemede bekleme kati artiyor, en fazla 15 saniye.
+        let wait = min(15.0, 1.5 * pow(1.6, Double(appReconnects - 1)))
+        showMirrorNotice(L("Bağlantı koptu — \(Int(wait)) sn sonra yeniden denenecek…",
+                           "Connection dropped — retrying in \(Int(wait))s…"),
+                         symbol: "arrow.clockwise")
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, self.mirrorViaApp, self.window?.isVisible == true else { return }
             Log.write("yansıtma: yeniden bağlanma denemesi \(self.appReconnects)")
             ScreenBridge.shared.start(host: t.host, token: t.token, quality: t.quality)
@@ -1072,10 +1088,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                      "To toggle auto-rotate, grant AndrOS the “modify system "
                    + "settings” permission on the phone.")
         case "locked":
-            return L("Telefon kilitli. Kilit ekranı Android'in güvenlik kuralı "
-                   + "gereği yakalanamıyor — şifreyi telefondan gir.",
-                     "The phone is locked. Android does not allow capturing the "
-                   + "lock screen — enter the passcode on the phone.")
+            return L("Telefon kilitli — ekranı uyandırdık ama kilit ekranı "
+                   + "Android'in güvenlik kuralı gereği yakalanamıyor. Şifreyi "
+                   + "telefondan gir, sonrası buradan sürer.",
+                     "The phone is locked — we woke the screen, but Android does "
+                   + "not allow capturing the lock screen. Enter the passcode on "
+                   + "the phone; everything after that works from here.")
         default: return code
         }
     }
@@ -1096,7 +1114,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     /// Yansitma acilamadi: SEBEBI ve cozumu.
+    /// Ayni sebebi ust uste anlatma: oyun sirasinda izin dusunce
+    /// pencere pencere uyari yigiliyordu.
+    private var lastMirrorFailure = ""
+
     private func explainMirrorFailure(_ why: String) {
+        guard why != lastMirrorFailure else {
+            showMirrorNotice(mirrorFailureShort(why))
+            return
+        }
+        lastMirrorFailure = why
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+            if self?.lastMirrorFailure == why { self?.lastMirrorFailure = "" }
+        }
         let a = NSAlert()
         a.messageText = L("Telefon ekranı alınamadı", "Could not capture the phone screen")
         switch why {
@@ -1116,6 +1146,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         a.addButton(withTitle: "Tamam")
         a.runModal()
+    }
+
+    private func mirrorFailureShort(_ why: String) -> String {
+        why == "noprojection"
+            ? L("Ekran paylaşımı sona erdi — telefondaki bildirime dokun.",
+                "Screen sharing ended — tap the notification on the phone.")
+            : why
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
