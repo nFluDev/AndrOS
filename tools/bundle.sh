@@ -39,7 +39,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>        <string>dev.naer.andros</string>
     <key>CFBundleExecutable</key>        <string>AndrOS</string>
     <key>CFBundlePackageType</key>       <string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0-beta.11</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0-beta.12</string>
     <key>CFBundleVersion</key>           <string>1</string>
     <key>LSMinimumSystemVersion</key>    <string>13.0</string>
     <key>NSHighResolutionCapable</key>   <true/>
@@ -48,10 +48,24 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+# IMZA KIMLIGI: sabit bir sertifika. Ad-hoc imza her derlemede
+# degisiyor ve macOS'un izin veritabani izni imzaya bagladigi icin
+# "Erisilebilirlik" izni her guncellemede sessizce gecersiz oluyordu
+# (listede isaretli gorunuyor ama calismiyor). Ayrinti: tools/signing.sh
+SIGN_ARGS=(--sign -)
+if source "$ROOT/tools/signing.sh" 2>/dev/null && [ -n "$ANDROS_SIGN_IDENTITY" ]; then
+  SIGN_ARGS=(--sign "$ANDROS_SIGN_IDENTITY" --keychain "$ANDROS_SIGN_KEYCHAIN")
+else
+  echo "  (sabit imza kimligi kurulamadi, ad-hoc imzalaniyor)"
+fi
+
 # Once uzanti, sonra uygulama: ic paketler disaridan once imzalanmali.
-codesign --force --sign - --entitlements "$ROOT/mac/CameraExtension/Extension.entitlements" \
+codesign --force "${SIGN_ARGS[@]}" --entitlements "$ROOT/mac/CameraExtension/Extension.entitlements" \
     "$APP/Contents/Library/SystemExtensions/dev.naer.andros.camera.systemextension" 2>/dev/null || true
-codesign --force --sign - "$APP/Contents/Resources/AndrOSAudio.driver" 2>/dev/null || true
-codesign --force --sign - --entitlements "$ROOT/mac/CameraExtension/App.entitlements" \
+codesign --force "${SIGN_ARGS[@]}" "$APP/Contents/Resources/AndrOSAudio.driver" 2>/dev/null || true
+codesign --force "${SIGN_ARGS[@]}" --entitlements "$ROOT/mac/CameraExtension/App.entitlements" \
     "$APP" 2>/dev/null || echo "  (imzasiz, sorun degil)"
+codesign -d -r- "$APP" 2>&1 | grep -q "certificate root" \
+    && echo "  imza: sabit kimlik (izinler guncellemeden sonra da gecerli)" \
+    || echo "  imza: ad-hoc (izinler her guncellemede yenilenmeli)"
 echo "Hazir: $APP"

@@ -56,6 +56,7 @@ final class SettingsPanel: NSViewController {
                 // Izni ACARKEN soruyoruz: kapatirken sormak sacma olurdu.
                 if on, !RemoteControl.isTrusted { RemoteControl.requestTrust() }
             },
+            axRow(),
         ])
 
         // --- AndrOS agi
@@ -250,6 +251,45 @@ final class SettingsPanel: NSViewController {
             ? L("AndrOS ağı kapatıldı.", "AndrOS network turned off.")
             : L("Bağlanılıyor…", "Connecting…")
         if v.isEmpty { SignalHub.shared.stop() } else { SignalHub.shared.start() }
+    }
+
+    /// Erisilebilirlik izninin GERCEK durumu ve bozulduysa onarim.
+    ///
+    /// Listede isaretli gorunup calismamasi mumkun: macOS izni
+    /// uygulamanin imzasina bagliyor ve eski surumlerin imzasi her
+    /// derlemede degisiyordu. Buradaki satir "gercekten calisiyor mu"
+    /// sorusunu yanitliyor.
+    private func axRow() -> NSView {
+        let ok = RemoteControl.isTrusted
+        let label = NSTextField(labelWithString: ok
+            ? L("Erişilebilirlik izni: çalışıyor", "Accessibility permission: working")
+            : L("Erişilebilirlik izni: yok ya da eskimiş",
+                "Accessibility permission: missing or stale"))
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = ok ? .secondaryLabelColor : .systemOrange
+
+        let fix = NSButton(title: L("Sıfırla", "Reset"), target: self,
+                           action: #selector(resetAX))
+        fix.bezelStyle = .rounded
+        fix.controlSize = .small
+        fix.isHidden = ok
+        fix.toolTip = L("İzin kaydını siler; macOS bir daha sorar.",
+                        "Removes the record so macOS asks again.")
+
+        let row = NSStackView(views: [label, fix])
+        row.orientation = .horizontal
+        row.spacing = 8
+        return row
+    }
+
+    @objc private func resetAX() {
+        let r = RawProcess.run("/usr/bin/tccutil",
+                               ["reset", "Accessibility", "dev.naer.andros"])
+        UserDefaults.standard.set(false, forKey: "axGrantedOnce")
+        statusLine.stringValue = r.code == 0
+            ? L("İzin kaydı silindi — telefondan bir hareket yap, macOS yeniden soracak.",
+                "Record removed — move on the phone and macOS will ask again.")
+            : L("Sıfırlanamadı (kod \(r.code)).", "Could not reset (code \(r.code)).")
     }
 
     @objc private func installOnPhone() {

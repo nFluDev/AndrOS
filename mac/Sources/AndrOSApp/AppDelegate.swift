@@ -707,6 +707,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             guard UserDefaults.standard.object(forKey: "remoteControl") as? Bool ?? true
             else { break }
             guard RemoteControl.isTrusted else { askForAccessibility(); break }
+            // Bir kez GERCEKTEN calistiysa not et: bir dahaki sefere
+            // izin yoksa sorun "hic verilmemis" degil "eskimis"tir.
+            if !UserDefaults.standard.bool(forKey: "axGrantedOnce") {
+                UserDefaults.standard.set(true, forKey: "axGrantedOnce")
+            }
             RemoteControl.shared.handle(data)
             return                      // bildirim paneli tazelemeye gerek yok
         default:
@@ -725,23 +730,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard !askedForAX else { return }
         askedForAX = true
         RemoteControl.requestTrust()
+
+        // ONCE VERILMIS MI? Verilmisse ve hala calismiyorsa sorun
+        // "izin yok" degil, "izin ESKIMIS": macOS izni uygulamanin
+        // imzasina bagliyor ve eski surumler her derlemede degisen
+        // ad-hoc imza kullaniyordu. Listede isaretli gorunuyor ama
+        // gecersiz. Bunu ayirt etmeden "izni ver" demek, kullaniciyi
+        // zaten acik olan bir anahtara bakmaya gonderiyordu.
+        let grantedBefore = UserDefaults.standard.bool(forKey: "axGrantedOnce")
+
         let a = NSAlert()
-        a.messageText = L("Mac'i telefondan yönetmek için izin gerekiyor",
-                          "Controlling the Mac from the phone needs permission")
-        a.informativeText = L(
-            "Sistem Ayarları › Gizlilik ve Güvenlik › Erişilebilirlik listesinde "
-          + "AndrOS'u aç. macOS, bu izin olmadan uygulamaların fare ve klavye "
-          + "olayı üretmesine izin vermiyor.",
-            "Open System Settings › Privacy & Security › Accessibility and enable "
-          + "AndrOS. macOS does not let an app synthesise mouse and keyboard "
-          + "events without it.")
+        a.messageText = grantedBefore
+            ? L("Erişilebilirlik izni eskimiş", "The Accessibility permission is stale")
+            : L("Mac'i telefondan yönetmek için izin gerekiyor",
+                "Controlling the Mac from the phone needs permission")
+        a.informativeText = grantedBefore
+            ? L("İzin daha önce verilmiş ama artık geçerli değil — listede işaretli "
+              + "görünse bile çalışmaz. Sebebi, macOS'un izni uygulamanın imzasına "
+              + "bağlaması ve eski sürümlerin imzasının her güncellemede "
+              + "değişmesiydi. Bu sürümden sonra bir daha olmayacak.\n\n"
+              + "“Sıfırla” kaydı siler; ardından izni bir kez daha vermen yeterli.",
+                "The permission was granted before but is no longer valid — it can "
+              + "look enabled and still not work. macOS ties the permission to the "
+              + "app's signature, and older builds changed signature on every "
+              + "update. From this version on it will not happen again.\n\n"
+              + "“Reset” removes the stale record; then grant it once more.")
+            : L("Sistem Ayarları › Gizlilik ve Güvenlik › Erişilebilirlik listesinde "
+              + "AndrOS'u aç. macOS, bu izin olmadan uygulamaların fare ve klavye "
+              + "olayı üretmesine izin vermiyor.",
+                "Open System Settings › Privacy & Security › Accessibility and enable "
+              + "AndrOS. macOS does not let an app synthesise mouse and keyboard "
+              + "events without it.")
+        if grantedBefore { a.addButton(withTitle: L("Sıfırla ve yeniden iste", "Reset and ask again")) }
         a.addButton(withTitle: L("Ayarları aç", "Open Settings"))
         a.addButton(withTitle: L("Sonra", "Later"))
-        if a.runModal() == .alertFirstButtonReturn,
-           let u = URL(string: "x-apple.systempreferences:com.apple.preference."
-                             + "security?Privacy_Accessibility") {
+
+        let choice = a.runModal()
+        if grantedBefore, choice == .alertFirstButtonReturn {
+            resetAccessibilityGrant()
+            return
+        }
+        let openIndex: NSApplication.ModalResponse =
+            grantedBefore ? .alertSecondButtonReturn : .alertFirstButtonReturn
+        if choice == openIndex, let u = URL(string:
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(u)
         }
+    }
+
+    /// Eskimis izin kaydini siler.
+    ///
+    /// `tccutil reset` kaydi tamamen kaldiriyor; boylece uygulama bir
+    /// dahaki istekte SISTEM KUTUSUNU yeniden cikarabiliyor. Kaydi elle
+    /// silmek de ayni isi gorur ama kullaniciyi listede "-" dugmesi
+    /// aramaya gondermek gereksiz.
+    private func resetAccessibilityGrant() {
+        let r = RawProcess.run("/usr/bin/tccutil", ["reset", "Accessibility", "dev.naer.andros"])
+        Log.write("erişilebilirlik izni sıfırlandı (kod \(r.code))")
+        UserDefaults.standard.set(false, forKey: "axGrantedOnce")
+        askedForAX = false
+        let done = NSAlert()
+        done.messageText = L("İzin kaydı silindi", "The permission record was removed")
+        done.informativeText = L(
+            "Şimdi telefondan bir hareket yap — macOS izni yeniden soracak. "
+          + "Sormazsa Sistem Ayarları › Gizlilik ve Güvenlik › Erişilebilirlik'ten aç.",
+            "Now move on the phone — macOS will ask again. If it does not, enable it "
+          + "in System Settings › Privacy & Security › Accessibility.")
+        done.addButton(withTitle: "Tamam")
+        done.runModal()
     }
 
     /// Su an hazir olan ilk baglanti.
