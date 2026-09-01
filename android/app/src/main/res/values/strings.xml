@@ -21,4 +21,18 @@
     <string name="control_hint">Sürükle: imleç · Dokun: sol tık · İki parmakla dokun: sağ tık · İki parmakla sürükle: kaydırma (yukarı/aşağı ve sağa/sola) · Dokun-sürükle: basılı taşıma. Masaüstü ve Mission Control yukarıdaki düğmelerde — Android üç parmak hareketlerini kendi kullanıyor.</string>
     <string name="control_ready">Mac bağlı</string>
     <string name="control_offline">Mac bağlı değil</string>
+    <string name="tab_phone">Telefon</string>
+    <string name="contacts">Rehber</string>
+    <string name="keypad">Tuş takımı</string>
+    <string name="number">Numara</string>
+    <string name="call">Ara</string>
+    <string name="message">Mesaj</string>
+    <string name="save">Kaydet</string>
+    <string name="search_contacts">Kişi ara</string>
+    <string name="add_contact">Kişi ekle</string>
+    <string name="contact_name">Ad</string>
+    <string name="edit">Düzenle</string>
+    <string name="delete">Sil</string>
+    <string name="cancel">Vazgeç</string>
+    <string name="swipe_hint">← mesaj · ara →</string>
 </resources>

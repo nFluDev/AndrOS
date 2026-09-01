@@ -16,6 +16,8 @@
 
         <include layout="@layout/page_home" />
 
+        <include layout="@layout/page_phone" />
+
         <include layout="@layout/page_control" />
     </FrameLayout>
 
@@ -42,6 +44,17 @@
                 android:src="@drawable/ic_home"
                 android:contentDescription="@string/tab_home" />
             <TextView style="@style/TabLabel" android:text="@string/tab_home" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabPhone"
+            style="@style/TabItem">
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/ic_phone"
+                android:contentDescription="@string/tab_phone" />
+            <TextView style="@style/TabLabel" android:text="@string/tab_phone" />
         </LinearLayout>
 
         <LinearLayout

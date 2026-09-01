@@ -255,10 +255,20 @@ class ScreenLink(
             setInteger(MediaFormat.KEY_BITRATE_MODE,
                        MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
         }
-        val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        val surf = enc.createInputSurface()
-        enc.start()
+        // Kodlayici kurulumu cihaza gore atabiliyor (mesela olcu
+        // desteklenmiyorsa). Cokmek yerine soyluyoruz.
+        val enc: MediaCodec
+        val surf: Surface
+        try {
+            enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            surf = enc.createInputSurface()
+            enc.start()
+        } catch (e: Throwable) {
+            Log.w(TAG, "kodlayici kurulamadi: ${e.message}")
+            sendError("encoder")
+            return
+        }
         encoder = enc
         surface = surf
         running = true
@@ -314,8 +324,8 @@ class ScreenLink(
                 val now = wm.defaultDisplay.rotation
                 if (now == rotation) return
                 Log.i(TAG, "donus degisti: $rotation -> $now")
-                stopCapture()
-                startCapture()
+                runCatching { stopCapture(); startCapture() }
+                    .onFailure { Log.w(TAG, "donuste yeniden kurulamadi: ${it.message}") }
             }
         }
         dm.registerDisplayListener(l, android.os.Handler(android.os.Looper.getMainLooper()))
@@ -352,7 +362,8 @@ class ScreenLink(
                     // genislik/yukseklik geliyor.
                     Thread.sleep(150)
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        if (running) { stopCapture(); startCapture() }
+                        runCatching { if (running) { stopCapture(); startCapture() } }
+                            .onFailure { Log.w(TAG, "donuste yeniden kurulamadi: ${it.message}") }
                     }
                     break       // yeni yakalama kendi yoklamasini baslatir
                 }
@@ -513,12 +524,21 @@ class ScreenLink(
     private var savedBrightness = -1
     private var wasLocked = false
 
+    /// Yazma hatasi UYGULAMAYI OLDURMEMELI.
+    ///
+    /// Olculen cokme: telefon donunce yakalama ana is parcaciginda
+    /// yeniden kuruluyor ve buradaki `IOException` yakalanmadan yukari
+    /// cikiyordu — surec oluyor, MediaProjection onunla birlikte gidiyor
+    /// ve kullanicidan yeniden izin isteniyordu. Oyun acinca olan buydu:
+    /// oyun ekrani cevirir, biz cokeriz.
     private fun sendMeta() {
         val o = out ?: return
-        val j = JSONObject().put("width", width).put("height", height)
-            .put("input", InputService.isEnabled)
-            .toString().toByteArray(Charsets.UTF_8)
-        synchronized(o) { o.writeByte(KIND_META); o.writeInt(j.size); o.write(j); o.flush() }
+        runCatching {
+            val j = JSONObject().put("width", width).put("height", height)
+                .put("input", InputService.isEnabled)
+                .toString().toByteArray(Charsets.UTF_8)
+            synchronized(o) { o.writeByte(KIND_META); o.writeInt(j.size); o.write(j); o.flush() }
+        }.onFailure { Log.d(TAG, "meta yazilamadi: ${it.message}") }
     }
 
     private fun sendError(code: String) {
