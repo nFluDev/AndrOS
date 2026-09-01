@@ -16,6 +16,7 @@ final class MessagesPanel: NSViewController, AndrOSPanel,
     private let threadScroll: NSScrollView
     private let composeField = NSTextField()
     private let sendButton = NSButton()
+    private let routePicker = NSPopUpButton()
     private let threadTitle = NSTextField(labelWithString: L("Bir sohbet seç", "Select a conversation"))
     private var selected: AndroidData.Conversation?
     private let spinner = NSProgressIndicator()
@@ -78,7 +79,22 @@ final class MessagesPanel: NSViewController, AndrOSPanel,
         sendButton.action = #selector(send)
         sendButton.toolTip = L("Mesaj telefonun mesaj uygulamasında hazır açılır", "The message opens prefilled in the phone's messaging app")
 
-        let compose = NSStackView(views: [composeField, sendButton])
+        // GONDERIM YOLU. Iki yol ayni kutudan gidiyor ve farklari
+        // onemli: SMS operatorden gider, ucreti vardir, sifresizdir ve
+        // yalniz metin tasir. AndrOS mesaji internetten gider,
+        // ucretsizdir, uctan uca sifrelidir — ama karsi tarafta
+        // uygulama ACIK VE BAGLI olmalı. Hangisinin kullanildigini
+        // gizlemek yanlis olurdu.
+        routePicker.addItems(withTitles: ["AndrOS", "SMS"])
+        routePicker.target = self
+        routePicker.action = #selector(routeChanged)
+        routePicker.controlSize = .small
+        routePicker.toolTip = L("AndrOS: internetten, uçtan uca şifreli. "
+                              + "SMS: operatörden, ücretli.",
+                                "AndrOS: over the internet, end-to-end encrypted. "
+                              + "SMS: through the carrier, paid.")
+
+        let compose = NSStackView(views: [routePicker, composeField, sendButton])
         compose.orientation = .horizontal
         compose.spacing = 8
         compose.translatesAutoresizingMaskIntoConstraints = false
@@ -177,7 +193,21 @@ final class MessagesPanel: NSViewController, AndrOSPanel,
 
     @objc private func send() {
         let text = composeField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty, let c = selected, let d = data else { return }
+        guard !text.isEmpty, let c = selected else { return }
+
+        // ANDROS YOLU: internetten, uctan uca sifreli. Telefonun
+        // hattina hic dokunmuyor, yani telefon kapali olsa da gider —
+        // yeter ki karsi taraf bagli olsun.
+        if routePicker.indexOfSelectedItem == 0,
+           let peer = SignalHub.shared.peerID(forNumber: c.address) {
+            NetworkMessages.shared.remember(peer: peer, number: c.address)
+            SignalHub.shared.sendMessage(to: peer, text: text)
+            composeField.stringValue = ""
+            showThread(c)
+            return
+        }
+
+        guard let d = data else { return }
         composeField.isEnabled = false
         DispatchQueue.global().async { [weak self] in
             // Uygulama eslesmisse GERCEKTEN gonderiyoruz. adb kabugunun
@@ -267,13 +297,53 @@ final class MessagesPanel: NSViewController, AndrOSPanel,
         showThread(filtered[r])
     }
 
+    /// Karsi taraf AndrOS aginda su an bagli mi?
+    private func refreshRoute() {
+        guard let c = selected else { return }
+        let peer = SignalHub.shared.peerID(forNumber: c.address)
+                ?? NetworkMessages.shared.peerID(forNumber: c.address)
+        let reachable = peer != nil && SignalHub.shared.peerID(forNumber: c.address) != nil
+        routePicker.item(at: 0)?.title = reachable
+            ? "AndrOS" : L("AndrOS (bağlı değil)", "AndrOS (offline)")
+        routePicker.item(at: 0)?.isEnabled = reachable
+        // Ulasilabiliyorsa VARSAYILAN o: ucretsiz ve sifreli olan yol.
+        if reachable, routePicker.indexOfSelectedItem != 0, !routeChosenByUser {
+            routePicker.selectItem(at: 0)
+        } else if !reachable {
+            routePicker.selectItem(at: 1)
+        }
+        sendButton.toolTip = routePicker.indexOfSelectedItem == 0
+            ? L("Uçtan uca şifreli, internetten.", "End-to-end encrypted, over the internet.")
+            : L("Operatör üzerinden SMS.", "SMS through the carrier.")
+    }
+
+    private var routeChosenByUser = false
+    @objc private func routeChanged() { routeChosenByUser = true; refreshRoute() }
+
     private func showThread(_ c: AndroidData.Conversation) {
         threadTitle.stringValue = c.title + "  ·  " + c.address
+        routeChosenByUser = false
+        SignalHub.shared.checkReachable([c.address])
+        refreshRoute()
         thread.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let fmt = DateFormatter()
         fmt.dateFormat = "d MMM HH:mm"
 
-        for m in c.messages.suffix(200) {
+        // IKI KAYNAK TEK AKIS: SMS telefonun veritabaninda, AndrOS
+        // mesajlari yalniz bizde. Ayri sekmelerde gostermek ayni
+        // konusmayi ikiye bolerdi; zamana gore birlestiriyoruz.
+        struct Line { let body: String; let incoming: Bool; let date: Date; let net: Bool }
+        var lines = c.messages.suffix(200).map {
+            Line(body: $0.body, incoming: $0.incoming, date: $0.date, net: false)
+        }
+        if let peer = NetworkMessages.shared.peerID(forNumber: c.address) {
+            lines += NetworkMessages.shared.messages(peer: peer).suffix(200).map {
+                Line(body: $0.text, incoming: !$0.outgoing, date: $0.at, net: true)
+            }
+        }
+        lines.sort { $0.date < $1.date }
+
+        for m in lines {
             let bubble = NSTextField(wrappingLabelWithString: m.body)
             bubble.font = .systemFont(ofSize: 12)
             bubble.textColor = m.incoming ? .labelColor : .white
@@ -284,9 +354,15 @@ final class MessagesPanel: NSViewController, AndrOSPanel,
             box.wantsLayer = true
             box.layer?.cornerRadius = 12
             if #available(macOS 10.15, *) { box.layer?.cornerCurve = .continuous }
+            // AndrOS mesajlari YESIL, SMS mavi: hangi yoldan gittigi
+            // baliga bakinca anlasilsin.
             box.layer?.backgroundColor = m.incoming
                 ? NSColor.labelColor.withAlphaComponent(0.08).cgColor
-                : NSColor.controlAccentColor.cgColor
+                : (m.net ? NSColor.systemGreen.cgColor : NSColor.controlAccentColor.cgColor)
+            if m.incoming, m.net {
+                box.layer?.borderWidth = 1
+                box.layer?.borderColor = NSColor.systemGreen.withAlphaComponent(0.5).cgColor
+            }
             bubble.translatesAutoresizingMaskIntoConstraints = false
             box.addSubview(bubble)
             NSLayoutConstraint.activate([
@@ -297,7 +373,8 @@ final class MessagesPanel: NSViewController, AndrOSPanel,
                 box.widthAnchor.constraint(lessThanOrEqualToConstant: 450),
             ])
 
-            let time = NSTextField(labelWithString: fmt.string(from: m.date))
+            let time = NSTextField(labelWithString:
+                fmt.string(from: m.date) + (m.net ? "  · AndrOS" : "  · SMS"))
             time.font = .systemFont(ofSize: 9)
             time.textColor = .tertiaryLabelColor
 

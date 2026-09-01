@@ -99,6 +99,14 @@ public final class SignalHub {
         c.onPresence = { [weak self] found, _ in
             guard let self else { return }
             self.reachable = found
+            // Hangi ozet hangi numaraydi? Gelen mesaji dogru sohbete
+            // koyabilmek icin kimlik<->numara eslemesi sakli tutuluyor;
+            // ag kimlik konusuyor, arayuz numara.
+            for (digest, peer) in found {
+                if let number = self.pendingLookups[digest] {
+                    NetworkMessages.shared.remember(peer: peer, number: number)
+                }
+            }
             self.onPresence?()
         }
         c.onUndeliverable = { to in Log.write("sinyal: \(to) bağlı değil") }
@@ -117,9 +125,18 @@ public final class SignalHub {
     }
 
     /// Bu numaralar su an ulasilabilir mi?
+    /// Ozet -> sorulan numara. Yanit yalniz ozeti tasiyor.
+    private var pendingLookups: [String: String] = [:]
+
     public func checkReachable(_ numbers: [String]) {
         guard let c = client else { return }
-        let digests = numbers.map { c.digest($0) }.filter { !$0.isEmpty }
+        var digests: [String] = []
+        for n in numbers {
+            let d = c.digest(n)
+            guard !d.isEmpty else { continue }
+            pendingLookups[d] = n
+            digests.append(d)
+        }
         guard !digests.isEmpty else { return }
         c.lookup(digests)
     }
@@ -134,9 +151,13 @@ public final class SignalHub {
 
     /// Metin mesaji. Karsi taraf taninmiyorsa once tanisma yollanir ve
     /// mesaj anahtarlar gelince gider.
-    public func sendMessage(to peer: String, text: String) {
+    @discardableResult
+    public func sendMessage(to peer: String, text: String) -> NetworkMessages.Message {
+        let m = NetworkMessages.Message(outgoing: true, text: text)
+        NetworkMessages.shared.add(peer: peer, m)
         send(to: peer, ["t": "msg", "text": text,
-                        "ts": Date().timeIntervalSince1970])
+                        "ts": m.at.timeIntervalSince1970])
+        return m
     }
 
     /// Cagri iletisi (davet, kabul, ret, aday adres…).
@@ -201,6 +222,10 @@ public final class SignalHub {
                 let ts = Date(timeIntervalSince1970: m["ts"] as? Double
                               ?? Date().timeIntervalSince1970)
                 let text = m["text"] as? String ?? ""
+                // SUNUCU SAKLAMIYOR: kayit bizde degilse hicbir yerde
+                // yok. Once yaz, sonra haber ver.
+                NetworkMessages.shared.add(peer: from,
+                    .init(outgoing: false, text: text, at: ts))
                 DispatchQueue.main.async { self.onMessage?(from, text, ts) }
             } else {
                 DispatchQueue.main.async { self.onCall?(from, m) }

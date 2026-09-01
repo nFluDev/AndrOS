@@ -736,6 +736,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         Log.write("AndrOS mesajı [\(from)]: \(text.prefix(40))")
         Notify.post(title: L("AndrOS mesajı", "AndrOS message"),
                     body: text, id: "andros.msg.\(from).\(Int(at.timeIntervalSince1970))")
+        // Acik sohbet varsa hemen gorunsun.
+        NotificationCenter.default.post(name: .androsNotificationsChanged, object: nil)
     }
 
     /// Erisilebilirlik izni yoksa BIR KEZ sor.
