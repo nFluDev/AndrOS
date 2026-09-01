@@ -48,6 +48,7 @@ class SettingsActivity : Activity() {
     private fun build() {
         buildBackground()
         buildUpdate()
+        buildNetwork()
         buildReset()
     }
 
@@ -145,6 +146,27 @@ class SettingsActivity : Activity() {
     }
 
     // MARK: - Sifirlama
+
+    /// AndrOS agi: sunucu adresi ve bu cihazin kimligi.
+    private fun buildNetwork() {
+        val field = findViewById<android.widget.EditText>(R.id.signalUrl)
+        val identity = findViewById<TextView>(R.id.signalIdentity)
+        val prefs = getSharedPreferences("andros", MODE_PRIVATE)
+        field.setText(prefs.getString("signalUrl", "") ?: "")
+        identity.text = "Kimliğin: " + dev.naer.andros.call.Keys(this).id
+        field.setOnEditorActionListener { _, _, _ ->
+            val v = field.text.toString().trim()
+            // `wss://` disinda adres kabul etmiyoruz: sunucu icerigi
+            // goremese de kimin kime yazdigini aradaki herkes gorurdu.
+            if (v.isNotEmpty() && !v.startsWith("wss://")) {
+                toast("Adres wss:// ile başlamalı.")
+            } else {
+                prefs.edit().putString("signalUrl", v).apply()
+                toast(if (v.isEmpty()) "AndrOS ağı kapatıldı." else "Kaydedildi.")
+            }
+            true
+        }
+    }
 
     private fun buildReset() {
         val box = findViewById<LinearLayout>(R.id.resetBox)

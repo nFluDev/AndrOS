@@ -17,6 +17,12 @@ public struct SignalKeys {
     /// derlemeden sonra yeniden izin istiyor ve kimligin degismesi
     /// karsi tarafta "baska cihaz" demek olurdu.
     private static var file: URL {
+        // Sinamada IKI KIMLIK gerekiyor (iki ayri cihaz gibi davranmak
+        // icin); bu degisken olmadan ayni makinede iki uc calistirmak
+        // mumkun degil.
+        if let custom = ProcessInfo.processInfo.environment["ANDROS_IDENTITY"] {
+            return URL(fileURLWithPath: custom)
+        }
         let dir = FileManager.default.urls(for: .applicationSupportDirectory,
                                            in: .userDomainMask)[0]
             .appendingPathComponent("AndrOS", isDirectory: true)

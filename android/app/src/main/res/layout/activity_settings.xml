@@ -63,6 +63,38 @@
             android:paddingEnd="16dp" />
 
         <!-- Guncelleme -->
+        <TextView style="@style/SectionHead" android:text="@string/sec_network" />
+
+        <EditText
+            android:id="@+id/signalUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/code_bg"
+            android:hint="wss://sunucu/ws"
+            android:imeOptions="actionDone"
+            android:inputType="textUri"
+            android:padding="12dp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_dim"
+            android:textSize="13sp"
+            android:autofillHints="" />
+
+        <TextView
+            android:id="@+id/signalIdentity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/network_note"
+            android:textColor="@color/text_dim"
+            android:textSize="11sp" />
+
         <TextView style="@style/SectionHead" android:text="@string/sec_update" />
         <LinearLayout
             android:id="@+id/updateBox"

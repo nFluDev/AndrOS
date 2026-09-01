@@ -58,6 +58,32 @@ final class SettingsPanel: NSViewController {
             },
         ])
 
+        // --- AndrOS agi
+        signalField.stringValue = SignalHub.serverURL
+        signalField.placeholderString = "wss://sunucu/ws"
+        signalField.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        signalField.target = self
+        signalField.action = #selector(signalURLChanged)
+        signalIdentity.stringValue = L("Kimliğin: \(SignalHub.shared.id)",
+                                       "Your identity: \(SignalHub.shared.id)")
+        signalIdentity.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        signalIdentity.textColor = .tertiaryLabelColor
+        let signalNote = NSTextField(labelWithString:
+            L("Uçtan uca şifreli mesaj ve arama için kendi sunucun. Sunucu içeriği "
+            + "göremez; yalnızca iki cihazı tanıştırır. Boş bırakırsan ağ kapalı kalır.",
+              "Your own server for end-to-end encrypted messages and calls. It cannot "
+            + "read content; it only introduces two devices. Leave empty to keep the "
+            + "network off."))
+        signalNote.font = .systemFont(ofSize: 10)
+        signalNote.textColor = .secondaryLabelColor
+        signalNote.maximumNumberOfLines = 3
+        signalNote.preferredMaxLayoutWidth = 420
+        let signalStack = NSStackView(views: [head(L("ANDROS AĞI", "ANDROS NETWORK")),
+                                              signalField, signalIdentity, signalNote])
+        signalStack.orientation = .vertical
+        signalStack.alignment = .leading
+        signalStack.spacing = 6
+
         // --- Menu cubugu
         let menubar = section(L("MENÜ ÇUBUĞU", "MENU BAR"), [
             toggle(L("Yansıtma yönetimi", "Mirroring controls"),
@@ -121,7 +147,8 @@ final class SettingsPanel: NSViewController {
         actions.alignment = .leading
         actions.spacing = 8
 
-        let stack = NSStackView(views: [title, version, general, remote, menubar, actions])
+        let stack = NSStackView(views: [title, version, general, remote, signalStack,
+                                       menubar, actions])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14
@@ -205,6 +232,25 @@ final class SettingsPanel: NSViewController {
     }
 
     // MARK: - Eylemler
+
+    private let signalField = NSTextField()
+    private let signalIdentity = NSTextField(labelWithString: "")
+
+    /// Adres degisince agi yeniden kur — kullanicinin uygulamayi
+    /// kapatip acmasi gerekmesin.
+    @objc private func signalURLChanged() {
+        let v = signalField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard v.isEmpty || SignalClient.isAllowed(v) else {
+            statusLine.stringValue = L("Adres wss:// ile başlamalı.",
+                                       "The address must start with wss://")
+            return
+        }
+        SignalHub.serverURL = v
+        statusLine.stringValue = v.isEmpty
+            ? L("AndrOS ağı kapatıldı.", "AndrOS network turned off.")
+            : L("Bağlanılıyor…", "Connecting…")
+        if v.isEmpty { SignalHub.shared.stop() } else { SignalHub.shared.start() }
+    }
 
     @objc private func installOnPhone() {
         onClose?()

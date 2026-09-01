@@ -661,6 +661,37 @@ do {
         print(done ? "SINAMA GEÇTI" : "SINAMA KALDI")
         exit(done ? 0 : 1)
 
+    // Iki uc arasinda GERCEK mesajlasma sinamasi.
+    //   androsctl chat <ws-adres> listen
+    //   androsctl chat <ws-adres> send <kimlik> <metin>
+    case "chat":
+        let addr = args.count > 1 ? args[1] : "ws://127.0.0.1:8899/ws"
+        let mode = args.count > 2 ? args[2] : "listen"
+        SignalHub.serverURL = addr
+        let hub = SignalHub.shared
+        print("kimlik: \(hub.id)")
+        var got = false
+        hub.onMessage = { from, text, _ in
+            print("mesaj [\(from)]: \(text)")
+            got = true
+        }
+        hub.onState = { print("durum: \($0)") }
+        hub.start()
+        if mode == "send", args.count > 4 {
+            // Baglanti kurulunca yolla: hazir olmadan gonderilen ileti
+            // sessizce dusuyordu.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                hub.sendMessage(to: args[3], text: args[4])
+                print("yollandı -> \(args[3])")
+            }
+        }
+        let until = Date().addingTimeInterval(mode == "send" ? 6 : 20)
+        while Date() < until, !(mode == "listen" && got) {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        hub.stop()
+        if mode == "listen" { print(got ? "MESAJ ALINDI" : "MESAJ GELMEDI"); exit(got ? 0 : 1) }
+
     case "parse":
         guard args.count >= 2 else { bad("kullanim: androsctl parse <dosya.h264|.h265>"); exit(1) }
         let path = args[1]
