@@ -618,6 +618,46 @@ do {
             + "yanlış kimlik reddi: \(bad ? "geçti" : "KALDI")")
         if !ok || !bad { exit(1) }
 
+    // Canli sinyal sunucusuna baglanip ucu uca sinar.
+    //   androsctl signal-live ws://127.0.0.1:8899/ws <tuz>
+    case "signal-live":
+        let addr = args.count > 1 ? args[1] : "ws://127.0.0.1:8899/ws"
+        let salt = args.count > 2 ? args[2] : "test"
+        let k = SignalKeys()
+        guard let c = SignalClient(keys: k, url: addr, salt: salt) else {
+            print("adres kabul edilmedi"); exit(1)
+        }
+        let digest = c.digest("0532 111 22 33")
+        c.myNumbers = [digest]
+        var done = false
+        c.onState = { st in
+            print("durum: \(st)")
+            if st == .ready {
+                print("kimlik: \(k.id) · numara özeti: \(digest)")
+                c.lookup([digest, c.digest("+905000000000")])
+            }
+        }
+        c.onPresence = { found, missing in
+            print("bulunan: \(found) · bulunamayan: \(missing.count) adet")
+            // Kendi kimligimize zarf yollayip geri almak, iletme yolunun
+            // tamamini sinar: muhurleme, sunucu, cozme.
+            let key = k.sharedKey(with: k.xPublic, myID: k.id, theirID: k.id)!
+            if let env = Envelope.seal(key, ["t": "msg", "text": "döngü sınaması"]) {
+                c.send(to: k.id, envelope: env)
+            }
+        }
+        c.onEnvelope = { from, env in
+            let key = k.sharedKey(with: k.xPublic, myID: k.id, theirID: from)!
+            print("zarf geldi (\(env.count) bayt): \(Envelope.open(key, env) ?? [:])")
+            done = true
+        }
+        c.connect()
+        let deadline = Date().addingTimeInterval(10)
+        while !done, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+        c.disconnect()
+        print(done ? "SINAMA GEÇTI" : "SINAMA KALDI")
+        exit(done ? 0 : 1)
+
     case "parse":
         guard args.count >= 2 else { bad("kullanim: androsctl parse <dosya.h264|.h265>"); exit(1) }
         let path = args[1]

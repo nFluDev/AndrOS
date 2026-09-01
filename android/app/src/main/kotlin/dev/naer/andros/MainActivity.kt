@@ -80,6 +80,17 @@ class MainActivity : AppCompatActivity() {
         handlePairUri(Uri.parse(text))
     }
 
+    /// Kisi karti okuyucusu. Eslestirme okuyucusundan AYRI: ayni
+    /// baslatici iki ise kosulunca hangi sonucun kime ait oldugu
+    /// belirsizlesiyor.
+    private var onContactScan: ((String) -> Unit)? = null
+    private val contactScanner = registerForActivityResult(ScanContract()) { result ->
+        val cb = onContactScan
+        onContactScan = null
+        val text = result.contents ?: return@registerForActivityResult
+        cb?.invoke(text)
+    }
+
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
         setTheme(R.style.Theme_AndrOS)
@@ -240,7 +251,15 @@ class MainActivity : AppCompatActivity() {
         pageHome = findViewById(R.id.pageHome)
         pagePhone = findViewById(R.id.pagePhone)
         pageControl = findViewById(R.id.pageControl)
-        phonePage = PhonePage(this, pagePhone)
+        phonePage = PhonePage(this, pagePhone) { done ->
+            onContactScan = done
+            contactScanner.launch(ScanOptions().apply {
+                setPrompt("Kişi kartını okut")
+                setBeepEnabled(false)
+                setOrientationLocked(false)
+                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            })
+        }
         trackpad = findViewById(R.id.trackpad)
         controlStatus = findViewById(R.id.controlStatus)
         keyInput = findViewById(R.id.keyInput)

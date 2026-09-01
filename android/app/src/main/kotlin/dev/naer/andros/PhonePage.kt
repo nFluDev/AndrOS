@@ -3,6 +3,7 @@ package dev.naer.andros
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.text.Editable
@@ -17,6 +18,7 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
+import dev.naer.andros.call.ContactQr
 import dev.naer.andros.feature.ContactsWriter
 import dev.naer.andros.feature.Permissions
 import kotlin.math.abs
@@ -31,7 +33,13 @@ import kotlin.math.abs
  * telefonun rehberine yaziliyor, oradan da Mac'e ve varsa Google
  * hesabina kendiliginden gidiyor.
  */
-class PhonePage(private val activity: Activity, private val root: View) {
+class PhonePage(
+    private val activity: Activity,
+    private val root: View,
+    /// QR okuyucuyu ETKINLIK aciyor: `ActivityResultLauncher` etkinlik
+    /// baslamadan kaydedilmek zorunda, bir gorunumden kaydedilemiyor.
+    private val scanQr: ((String) -> Unit) -> Unit = {},
+) {
 
     private val keypadBox: LinearLayout = root.findViewById(R.id.keypadBox)
     private val contactsBox: LinearLayout = root.findViewById(R.id.contactsBox)
@@ -54,13 +62,30 @@ class PhonePage(private val activity: Activity, private val root: View) {
         root.findViewById<Button>(R.id.dialSave).setOnClickListener {
             editDialog(null, "", dialField.text.toString())
         }
-        root.findViewById<Button>(R.id.addContact).setOnClickListener { editDialog(null, "", "") }
+        root.findViewById<Button>(R.id.addContact).setOnClickListener { addContact() }
 
         // Numara yazarken rehberde ARA: telefonun kendi tus takimi da
         // boyle davraniyor ve numarayi ezberlemek gerekmiyor.
         dialField.addTextChangedListener(simpleWatcher { showMatch() })
         contactSearch.addTextChangedListener(simpleWatcher { renderContacts() })
         setMode(false)
+    }
+
+    /// Kisi ekleme: elle mi, QR'dan mi? QR ile eklemek en sik yol
+    /// oldugu icin dogrudan tarayiciyi acan bir secenek var.
+    private fun addContact() {
+        AlertDialog.Builder(activity)
+            .setTitle(R.string.add_contact)
+            .setItems(arrayOf("Elle gir", "QR tarat")) { _, which ->
+                if (which == 0) { editDialog(null, "", ""); return@setItems }
+                scanQr { text ->
+                    val card = ContactQr.parse(text)
+                    if (card == null) { toast("Bu QR bir kişi kartı değil."); return@scanQr }
+                    editDialog(null, card.name, card.number)
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     fun refresh() {
@@ -159,6 +184,87 @@ class PhonePage(private val activity: Activity, private val root: View) {
         return out.sortedBy { it.name.lowercase() }
     }
 
+    /// Telefonun KENDI numarasi. Rehberde en ustte ayri duruyor —
+    /// telefonun kendi rehberi de boyle gosteriyor.
+    private fun ownNumber(): String {
+        var number = ""
+        runCatching {
+            val uri = android.net.Uri.withAppendedPath(
+                android.provider.ContactsContract.Profile.CONTENT_URI,
+                android.provider.ContactsContract.Contacts.Data.CONTENT_DIRECTORY)
+            activity.contentResolver.query(uri,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER),
+                "${android.provider.ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Phone
+                            .CONTENT_ITEM_TYPE), null)
+                ?.use { if (it.moveToFirst()) number = it.getString(0) ?: "" }
+        }
+        if (number.isBlank()) runCatching {
+            val sm = activity.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
+                as android.telephony.SubscriptionManager
+            @Suppress("MissingPermission")
+            number = sm.activeSubscriptionInfoList?.firstOrNull {
+                !it.number.isNullOrBlank() }?.number ?: ""
+        }
+        if (number.isBlank()) runCatching {
+            val tm = activity.getSystemService(Context.TELEPHONY_SERVICE)
+                as android.telephony.TelephonyManager
+            @Suppress("MissingPermission", "DEPRECATION")
+            number = tm.line1Number ?: ""
+        }
+        return number.replace(" ", "")
+    }
+
+    /// "Bu Cihaz" satiri: numara solda, QR simgesi en sagda. Satirin
+    /// HERHANGI bir yerine dokununca QR aciliyor — kucuk simgeyi
+    /// nisanlamak zorunda kalmayasin diye.
+    private fun deviceRow(): View {
+        val number = ownNumber()
+        val v = LayoutInflater.from(activity)
+            .inflate(R.layout.contact_row, contactList, false)
+        v.findViewById<TextView>(R.id.rowName).text = "Bu Cihaz"
+        v.findViewById<TextView>(R.id.rowNumber).text =
+            if (number.isBlank()) "numara yok (SIM'de kayıtlı değil)" else number
+        v.findViewById<TextView>(R.id.rowHint).apply {
+            text = "▣"
+            textSize = 20f
+            setTextColor(activity.getColor(R.color.accent))
+        }
+        v.setOnClickListener {
+            if (number.isBlank()) toast("Numara bulunamadı — operatör SIM'e yazmamış.")
+            else showQr("Bu Cihaz", number)
+        }
+        return v
+    }
+
+    /// Kisi kartini QR olarak gosterir.
+    private fun showQr(name: String, number: String) {
+        val px = (activity.resources.displayMetrics.density * 260).toInt()
+        val bmp = ContactQr.bitmap(ContactQr.encode(name, number), px)
+        if (bmp == null) { toast("QR üretilemedi."); return }
+        val image = android.widget.ImageView(activity).apply {
+            setImageBitmap(bmp)
+            setPadding(40, 40, 40, 16)
+        }
+        val label = TextView(activity).apply {
+            text = if (name.isBlank()) number else "$name\n$number"
+            gravity = android.view.Gravity.CENTER
+            setTextColor(activity.getColor(R.color.text_dim))
+            textSize = 13f
+            setPadding(0, 0, 0, 24)
+        }
+        val box = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            addView(image); addView(label)
+        }
+        AlertDialog.Builder(activity)
+            .setTitle(if (name.isBlank()) "Kişi kartı" else name)
+            .setView(box)
+            .setPositiveButton("Kapat", null)
+            .show()
+    }
+
     private fun renderContacts() {
         val q = contactSearch.text.toString().trim().lowercase()
         val shown = if (q.isEmpty()) contacts
@@ -166,6 +272,9 @@ class PhonePage(private val activity: Activity, private val root: View) {
                         it.name.lowercase().contains(q) || it.number.contains(q)
                     }
         contactList.removeAllViews()
+        // "Bu Cihaz" yalniz arama boskan: suzgecte gorunmesi listeyi
+        // yaniltir.
+        if (q.isEmpty()) contactList.addView(deviceRow())
         for (r in shown.take(500)) contactList.addView(contactRow(r))
         if (shown.isEmpty()) {
             contactList.addView(TextView(activity).apply {
@@ -205,6 +314,7 @@ class PhonePage(private val activity: Activity, private val root: View) {
                 return true
             }
         })
+        v.setOnLongClickListener { showQr(r.name, r.number); true }
         return v
     }
 
@@ -227,21 +337,26 @@ class PhonePage(private val activity: Activity, private val root: View) {
         box.addView(nameField)
         box.addView(numField)
 
+        // QR TARAT: kartin elle yazilmasi gereksiz. Okunan kart alanlara
+        // dolduruluyor, kaydetmeye yine kullanici karar veriyor.
+        val scanButton = Button(activity).apply {
+            text = "QR tarat"
+            setOnClickListener {
+                scanQr { text ->
+                    val card = ContactQr.parse(text)
+                    if (card == null) { toast("Bu QR bir kişi kartı değil."); return@scanQr }
+                    if (card.name.isNotBlank()) nameField.setText(card.name)
+                    if (card.number.isNotBlank()) numField.setText(card.number)
+                }
+            }
+        }
+        box.addView(scanButton)
+
         val b = AlertDialog.Builder(activity)
             .setTitle(if (id == null) R.string.add_contact else R.string.edit)
             .setView(box)
             .setPositiveButton(R.string.save) { _, _ ->
-                val n = nameField.text.toString().trim()
-                val num = numField.text.toString().trim()
-                if (Permissions.missing(activity, Manifest.permission.WRITE_CONTACTS) != null) {
-                    ActivityCompat.requestPermissions(
-                        activity, arrayOf(Manifest.permission.WRITE_CONTACTS), 4)
-                    return@setPositiveButton
-                }
-                val ok = if (id == null) ContactsWriter.add(activity, n, num) != null
-                         else ContactsWriter.update(activity, id, n, num)
-                toast(if (ok) "Kaydedildi." else "Kaydedilemedi.")
-                refresh()
+                save(id, nameField.text.toString().trim(), numField.text.toString().trim())
             }
             .setNegativeButton(R.string.cancel, null)
         if (id != null) {
@@ -259,6 +374,44 @@ class PhonePage(private val activity: Activity, private val root: View) {
             }
         }
         b.show()
+    }
+
+    /**
+     * Kaydetme.
+     *
+     * Yeni kisi eklerken AYNI ADDA (buyuk/kucuk harf ayirmadan) bir
+     * kisi varsa sessizce ikinci bir kayit acmiyoruz — QR ile eklerken
+     * ayni kisiyi tekrar tekrar eklemek en kolay yapilan sey. Kullanici
+     * seciyor: yeni kayit mi, mevcudun uzerine mi.
+     */
+    private fun save(id: Long?, name: String, number: String) {
+        if (name.isBlank() && number.isBlank()) return
+        if (Permissions.missing(activity, Manifest.permission.WRITE_CONTACTS) != null) {
+            ActivityCompat.requestPermissions(
+                activity, arrayOf(Manifest.permission.WRITE_CONTACTS), 4)
+            return
+        }
+        if (id != null) { apply(id, name, number); return }
+
+        val match = contacts.firstOrNull { it.name.equals(name, ignoreCase = true) }
+        if (match == null || name.isBlank()) { apply(null, name, number); return }
+
+        AlertDialog.Builder(activity)
+            .setTitle("“${match.name}” zaten var")
+            .setMessage("Numarası: ${match.number}")
+            .setPositiveButton("Mevcut kişiyi güncelle") { _, _ ->
+                apply(match.id, name, number)
+            }
+            .setNeutralButton("Yeni kişi oluştur") { _, _ -> apply(null, name, number) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun apply(id: Long?, name: String, number: String) {
+        val ok = if (id == null) ContactsWriter.add(activity, name, number) != null
+                 else ContactsWriter.update(activity, id, name, number)
+        toast(if (ok) "Kaydedildi." else "Kaydedilemedi.")
+        refresh()
     }
 
     // MARK: - Arama ve mesaj
