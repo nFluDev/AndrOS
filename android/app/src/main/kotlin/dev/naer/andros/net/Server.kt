@@ -112,11 +112,23 @@ class Server(
      * `catch` icinde yutuluyordu, bu yuzden bildirimler Mac'e HIC
      * ulasmiyor ama hicbir hata da gorunmuyordu — olculdu.
      */
+    /**
+     * Bagli Mac'lere olay yollar.
+     *
+     * TEK IS PARCACIGI: her olay icin ayri coroutine baslatmak SIRAYI
+     * bozuyordu. Bildirimde onemsizdi, ama kumandada imlec farklari
+     * sirasiz gidince imlec titriyor. Ayrica yalniz YETKILI istemcilere:
+     * eslesmemis bir baglantiya olay gitmemeli.
+     */
     fun broadcast(event: JSONObject) {
-        val list = synchronized(clients) { clients.toList() }
+        val list = synchronized(clients) { clients.filter { it.authorized } }
         if (list.isEmpty()) return
-        scope.launch(guard) { list.forEach { it.send(event) } }
+        scope.launch(events + guard) { list.forEach { it.send(event) } }
     }
+
+    /// Olay sirasini koruyan tek is parcacigi.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val events = Dispatchers.IO.limitedParallelism(1)
 
     private inner class ClientLink(val out: DataOutputStream) {
         var authorized = false

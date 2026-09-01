@@ -701,10 +701,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                                actions: acts)
         case "notifications.changed":
             break
+        case "remote.input":
+            // TELEFON = Mac'in dokunmatik yuzeyi. Bu yon yansitmanin
+            // TERSI: goruntu gitmiyor, yalnizca girdi geliyor.
+            guard UserDefaults.standard.object(forKey: "remoteControl") as? Bool ?? true
+            else { break }
+            guard RemoteControl.isTrusted else { askForAccessibility(); break }
+            RemoteControl.shared.handle(data)
+            return                      // bildirim paneli tazelemeye gerek yok
         default:
             break
         }
         NotificationCenter.default.post(name: .androsNotificationsChanged, object: nil)
+    }
+
+    /// Erisilebilirlik izni yoksa BIR KEZ sor.
+    ///
+    /// macOS sentetik fare/klavye olaylarini bu izin olmadan yutuyor —
+    /// hicbir hata vermeden. Sessiz kalmak "telefondan kontrol
+    /// calismiyor" demek olurdu.
+    private var askedForAX = false
+    private func askForAccessibility() {
+        guard !askedForAX else { return }
+        askedForAX = true
+        RemoteControl.requestTrust()
+        let a = NSAlert()
+        a.messageText = L("Mac'i telefondan yönetmek için izin gerekiyor",
+                          "Controlling the Mac from the phone needs permission")
+        a.informativeText = L(
+            "Sistem Ayarları › Gizlilik ve Güvenlik › Erişilebilirlik listesinde "
+          + "AndrOS'u aç. macOS, bu izin olmadan uygulamaların fare ve klavye "
+          + "olayı üretmesine izin vermiyor.",
+            "Open System Settings › Privacy & Security › Accessibility and enable "
+          + "AndrOS. macOS does not let an app synthesise mouse and keyboard "
+          + "events without it.")
+        a.addButton(withTitle: L("Ayarları aç", "Open Settings"))
+        a.addButton(withTitle: L("Sonra", "Later"))
+        if a.runModal() == .alertFirstButtonReturn,
+           let u = URL(string: "x-apple.systempreferences:com.apple.preference."
+                             + "security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(u)
+        }
     }
 
     /// Su an hazir olan ilk baglanti.
@@ -847,6 +884,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                           + one.getProp("ro.build.version.release")
                 }
             }
+            // UYGULAMA yoluyla bagli telefonlar da yansitma listesinde.
+            //
+            // Onceden liste yalniz adb cihazlarindan geliyordu: telefon
+            // eslesip her sey calisirken "Screen Mirroring"de hicbir sey
+            // gorunmuyordu. Artik goruntu de uygulama uzerinden geldigi
+            // icin (MediaProjection + erisilebilirlik) burada olmasi
+            // gerekiyor.
+            for (id, link) in (self?.companionLinks ?? [:]) where link.state == .ready {
+                if list.contains(where: { $0.serial == id }) { continue }
+                let nm = self?.companionStore.paired().first { $0.id == id }?.name ?? "Android"
+                list.append(HubDevice(serial: id, model: nm, manufacturer: "",
+                                      android: "", overWifi: true, viaApp: true))
+            }
+
             // adb HIC yoksa ama uygulama eslesmisse veri katmani yine
             // kurulmali: hedef zaten hata ayiklamasiz calismak. adb'ye
             // dusen moduller bos doner, uygulamayi tercih edenler calisir.
@@ -886,6 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func stopMirroring() {
+        stopAppMirroring()
         session.stop()
         mirrorEmbedded = false
         window?.orderOut(nil)
@@ -895,6 +947,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     /// Secilen cihazla aynalamayi baslatir.
     private func launchMirroring(_ device: HubDevice) {
         Log.write("ana pencere: aynalama baslatiliyor -> \(device.serial)")
+        if device.viaApp { startAppMirroring(device); return }
         UserDefaults.standard.set(device.serial, forKey: "lastSerial")
         if case .running = session.state { return }
         // Aynalama KENDI penceresinde acilir; ana pencere bagimsiz kalir,
@@ -902,6 +955,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         mirrorEmbedded = false
         ensureWindow()
         session.start(bitRate: bitRate, maxFPS: maxFPS, forceFullRange: false)
+    }
+
+    // MARK: - Yansitma: UYGULAMA yolu (hata ayiklamasiz)
+
+    private var appMirror: AppMirrorWindowController?
+
+    /// Telefondaki uygulama uzerinden yansitma.
+    ///
+    /// adb'li yoldan farki: goruntuyu `MediaProjection` uretiyor, dokunma
+    /// da erisilebilirlik hizmetine JEST olarak gidiyor. Hicbiri hata
+    /// ayiklama istemiyor.
+    private func startAppMirroring(_ device: HubDevice) {
+        guard let link = companionLinks[device.serial], let host = link.remoteHost,
+              let token = companionStore.token(for: device.serial) else {
+            Log.write("yansıtma: uygulama bağlantısı yok")
+            return
+        }
+        let wc = appMirror ?? AppMirrorWindowController()
+        appMirror = wc
+        let bridge = ScreenBridge.shared
+
+        wc.mirror.onTap       = { bridge.tap($0, $1) }
+        wc.mirror.onLongPress = { bridge.longPress($0, $1) }
+        wc.mirror.onSwipe     = { bridge.swipe($0, ms: $1) }
+        wc.mirror.onBack      = { bridge.back() }
+        wc.mirror.onText      = { bridge.type($0) }
+        wc.mirror.onBackspace = { bridge.backspace() }
+        wc.onBack    = { bridge.back() }
+        wc.onHome    = { bridge.home() }
+        wc.onRecents = { bridge.recents() }
+        wc.onClose   = { [weak self] in self?.stopAppMirroring() }
+
+        bridge.onFrame = { [weak wc] px in wc?.mirror.show(px) }
+        bridge.onState = { [weak self] st in
+            guard let self else { return }
+            self.appMirror?.setInputReady(ScreenBridge.shared.inputReady)
+            self.main?.setMirroring(st == .on)
+            if case .failed(let why) = st { self.explainMirrorFailure(why) }
+        }
+        bridge.start(host: host, token: token)
+        wc.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        main?.setMirroring(true)
+    }
+
+    private func stopAppMirroring() {
+        guard appMirror != nil else { return }
+        ScreenBridge.shared.stop()
+        appMirror?.onClose = nil
+        appMirror?.close()
+        appMirror = nil
+        main?.setMirroring(false)
+    }
+
+    /// Yansitma acilamadi: SEBEBI ve cozumu.
+    private func explainMirrorFailure(_ why: String) {
+        let a = NSAlert()
+        a.messageText = L("Telefon ekranı alınamadı", "Could not capture the phone screen")
+        switch why {
+        case "noprojection":
+            a.informativeText = L(
+                "Telefon ekran kaydı iznini vermemiş. Telefonda AndrOS uygulamasını "
+              + "aç ve çıkan \"Kaydetmeye başla\" onayını ver — aynı izin ses için de "
+              + "kullanılıyor, bir kez yeterli.",
+                "The phone has not granted screen capture. Open the AndrOS app on the "
+              + "phone and accept the \"Start recording\" prompt — the same permission "
+              + "covers audio, so once is enough.")
+        default:
+            a.informativeText = why
+        }
+        a.addButton(withTitle: "Tamam")
+        a.runModal()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }

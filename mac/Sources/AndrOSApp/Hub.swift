@@ -52,6 +52,9 @@ struct HubDevice {
     let manufacturer: String
     let android: String
     let overWifi: Bool
+    /// Yansitma adb ile mi, TELEFONDAKI UYGULAMA ile mi?
+    /// Uygulama yolu hata ayiklama istemiyor — projenin asil amaci.
+    var viaApp = false
 
     var title: String {
         let m = manufacturer.isEmpty ? "" : manufacturer + " "
@@ -61,7 +64,7 @@ struct HubDevice {
     /// yanindaki biri varken goze carpmasin. Gercek deger satirdaki
     /// kopyala dugmesiyle alinabilir, ekrana hic yazilmaz.
     var detail: String {
-        let link = overWifi ? "Wi-Fi" : "USB"
+        let link = viaApp ? L("Uygulama", "App") : (overWifi ? "Wi-Fi" : "USB")
         let ver = android.isEmpty ? "" : " · Android \(android)"
         return "\(link)\(ver) · \(Privacy.mask(serial))"
     }

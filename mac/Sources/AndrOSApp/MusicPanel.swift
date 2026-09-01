@@ -280,31 +280,37 @@ final class MusicPanel: NSViewController, AndrOSPanel,
         }
     }
 
-    /// Parcanin KAYNAGI.
+    /// Parcanin KAYNAGI: ONBELLEK, yoksa INDIR.
     ///
-    /// Once AKIS: telefondaki HTTP sunucusu byte-range destekliyor,
-    /// `AVPlayer` ilk saniyeler gelir gelmez basliyor — videolarda
-    /// oldugu gibi. Indirme yalnizca akis kurulamazsa; boylece 4 MB'lik
-    /// bir parcayi dinlemek icin once 4 MB beklemek gerekmiyor ve
-    /// diskte kopya birikmiyor.
+    /// Akis denendi ve geri alindi: `AVPlayer` ile HTTP uzerinden calmak
+    /// pratikte calismadi. Muzik motoru `AVAudioEngine` uzerine kurulu
+    /// (ekolayzer, hassas konum, kesintisiz gecis) ve o yalniz YEREL
+    /// dosya okuyor. Resim ve video akista kaliyor — onlarin oynaticisi
+    /// zaten `AVPlayer`.
     private func fetch(_ t: AndroidData.Track, _ done: @escaping (URL?) -> Void) {
         let local = MusicPanel.cacheDir.appendingPathComponent(MusicPanel.cacheName(t))
-        // Onbellekte varsa oradan: en hizlisi.
+        // Onbellek DISKTEN kontrol ediliyor: sozluk uygulama yeniden
+        // baslayinca bosaliyor ve ayni parca tekrar tekrar iniyordu.
         let size = ((try? FileManager.default
             .attributesOfItem(atPath: local.path)[.size]) as? Int) ?? 0
-        if size > 1024 { cache[t.path] = local; done(local); return }
-
-        guard let d = data else { done(nil); return }
-        if d.companion?.isReady == true, let url = d.streamURL(for: t.path) {
-            done(url)
+        if size > 1024 {
+            cache[t.path] = local
+            done(local)
+            prefetchNext()
             return
         }
-
-        // Akis yoksa indir (adb yolu ya da eski telefon uygulamasi).
+        guard data != nil else { done(nil); return }
         TransferQueue.shared.enqueue(name: t.title, remote: t.path,
                                      local: local.path, direction: .download) { [weak self] ok in
             DispatchQueue.main.async {
-                if ok { self?.cache[t.path] = local; done(local) } else { done(nil) }
+                if ok {
+                    self?.cache[t.path] = local
+                    done(local)
+                    // ONDEN INDIRME yalniz BASARIDAN sonra.
+                    self?.prefetchNext()
+                } else {
+                    done(nil)
+                }
             }
         }
     }

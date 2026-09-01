@@ -11,4 +11,14 @@
     <string name="sec_background">BAŞLANGIÇ VE ARKA PLAN</string>
     <string name="sec_update">GÜNCELLEME</string>
     <string name="sec_reset">SIFIRLAMA</string>
+    <string name="input_service_desc">AndrOS, Mac\'ten gelen dokunma ve yazma komutlarını ekrana iletir. Ekran içeriğiniz okunmaz, hiçbir yere gönderilmez.</string>
+    <string name="tab_home">Ana sayfa</string>
+    <string name="tab_control">Kumanda</string>
+    <string name="left_click">Sol tık</string>
+    <string name="right_click">Sağ tık</string>
+    <string name="keyboard">Klavye</string>
+    <string name="keyboard_hint">Yaz — harfler Mac’e gider</string>
+    <string name="control_hint">Sürükle: imleç · Dokun: sol tık · İki parmakla dokun: sağ tık · İki parmakla sürükle: kaydırma · Üç parmak sağ/sol: masaüstü değiştir · Üç parmak yukarı: Mission Control · Üç parmak aşağı: geri</string>
+    <string name="control_ready">Mac bağlı</string>
+    <string name="control_offline">Mac bağlı değil</string>
 </resources>

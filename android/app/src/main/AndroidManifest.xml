@@ -102,6 +102,20 @@
             </intent-filter>
         </receiver>
 
+        <!-- Girdi: baska uygulamalara dokunmanin adb'siz TEK yolu.
+             Kullanici Ayarlar > Erisilebilirlik'ten aciyor. -->
+        <service
+            android:name=".feature.InputService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/input_service" />
+        </service>
+
         <!-- Bildirim erisimi: normal izin diyaloguyla verilemiyor,
              kullanici Ayarlar > Bildirim erisimi'nden aciyor. -->
         <service

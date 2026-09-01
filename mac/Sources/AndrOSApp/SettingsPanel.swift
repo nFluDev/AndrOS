@@ -45,6 +45,19 @@ final class SettingsPanel: NSViewController {
                    key: "autoUpdate", default: true) { _ in },
         ])
 
+        // --- Telefondan Mac'i yonetme
+        let remote = section(L("TELEFONDAN YÖNETME", "CONTROL FROM PHONE"), [
+            toggle(L("Telefon dokunmatik yüzey olsun", "Use the phone as a trackpad"),
+                   L("Telefondaki Kumanda sekmesi Mac'in faresi ve klavyesi olur. "
+                   + "macOS bunun için Erişilebilirlik izni ister.",
+                     "The Control tab on the phone drives the Mac's mouse and keyboard. "
+                   + "macOS asks for the Accessibility permission for this."),
+                   key: "remoteControl", default: true) { on in
+                // Izni ACARKEN soruyoruz: kapatirken sormak sacma olurdu.
+                if on, !RemoteControl.isTrusted { RemoteControl.requestTrust() }
+            },
+        ])
+
         // --- Menu cubugu
         let menubar = section(L("MENÜ ÇUBUĞU", "MENU BAR"), [
             toggle(L("Yansıtma yönetimi", "Mirroring controls"),
@@ -108,7 +121,7 @@ final class SettingsPanel: NSViewController {
         actions.alignment = .leading
         actions.spacing = 8
 
-        let stack = NSStackView(views: [title, version, general, menubar, actions])
+        let stack = NSStackView(views: [title, version, general, remote, menubar, actions])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 14

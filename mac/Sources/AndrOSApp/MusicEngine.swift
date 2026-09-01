@@ -193,10 +193,13 @@ final class MusicEngine {
     private var streamEnd: NSObjectProtocol?
 
     private func start(_ url: URL) {
-        // UZAK URL = AKIS. `AVAudioFile` yalniz yerel dosya okuyabiliyor;
-        // videolarda oldugu gibi burada da indirmeyi beklemiyoruz.
-        if !url.isFileURL {
-            startStream(url)
+        // UZAK URL: akis yolu DENENDI VE GERI ALINDI (bkz. MusicPanel).
+        // Buraya yalniz yerel dosya geliyor; uzak URL gelirse parcayi
+        // atlamak yerine hata yolundan gecsin.
+        guard url.isFileURL else {
+            Log.write("muzik: uzak URL beklenmiyor — \(url.lastPathComponent)")
+            generation += 1
+            next()
             return
         }
         stopStream()

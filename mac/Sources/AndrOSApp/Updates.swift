@@ -54,9 +54,10 @@ enum Updates {
             let url = mac?["browser_download_url"] as? String
                 ?? (j["html_url"] as? String ?? "")
             let local = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-            finish(isNewer(remote, than: local)
-                   ? .available(version: remote, url: url, notes: notes)
-                   : .upToDate)
+            let newer = isNewer(remote, than: local)
+            Log.write("güncelleme: uzak \(remote) · yerel \(local) · yeni mi: \(newer)")
+            finish(newer ? .available(version: remote, url: url, notes: notes)
+                         : .upToDate)
         }.resume()
     }
 

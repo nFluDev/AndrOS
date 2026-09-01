@@ -15,16 +15,20 @@ import androidx.core.app.ActivityCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import dev.naer.andros.feature.NotificationListener
+import dev.naer.andros.feature.InputService
 import dev.naer.andros.feature.Permissions
+import dev.naer.andros.feature.TrackpadView
 import dev.naer.andros.net.Identity
 import dev.naer.andros.net.Pairing
 
 /**
- * Tek ekran: durum, eslestirme ve izinler.
+ * Altta sekmeler: Ana sayfa · Kumanda · Ayarlar.
  *
- * Is akisi Mac tarafinda; burasi yalniz baglantiyi yonetiyor. Tasarim
- * Mac uygulamasiyla ayni dili konusuyor: koyu zemin, yumusak koseli
- * kartlar, yesil vurgu.
+ * Ana sayfa baglantiyi yonetiyor; Kumanda telefonu Mac'in dokunmatik
+ * yuzeyi yapiyor. Sekmeler AYRI EKRAN ACMIYOR — ayni pencerede sayfa
+ * degistiriyor, boylece eslestirme kodu ya da baglanti durumu geciste
+ * kaybolmuyor. Tasarim Mac uygulamasiyla ayni dili konusuyor: koyu
+ * zemin, yumusak koseli kartlar, yesil vurgu.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -38,6 +42,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toggleButton: Button
     private lateinit var scanButton: Button
     private lateinit var permBox: LinearLayout
+
+    // --- Kumanda sekmesi
+    private lateinit var pageHome: android.view.View
+    private lateinit var pageControl: android.view.View
+    private lateinit var trackpad: TrackpadView
+    private lateinit var controlStatus: TextView
+    private lateinit var keyInput: EditText
+    private val tabs by lazy {
+        listOf(findViewById<LinearLayout>(R.id.tabHome),
+               findViewById<LinearLayout>(R.id.tabControl),
+               findViewById<LinearLayout>(R.id.tabSettings))
+    }
 
     /// Kamerayla QR okuma UYGULAMANIN ICINDE: kullanicinin telefonunda
     /// kamera uygulamasi QR okumuyor, dolayisiyla derin baglantiya
@@ -75,6 +91,7 @@ class MainActivity : AppCompatActivity() {
         toggleButton = findViewById(R.id.toggleButton)
         scanButton = findViewById(R.id.scanButton)
         permBox = findViewById(R.id.permBox)
+        setupTabs()
 
         toggleButton.setOnClickListener {
             if (AndrOSService.running) AndrOSService.stop(this)
@@ -82,9 +99,6 @@ class MainActivity : AppCompatActivity() {
             toggleButton.postDelayed({ refresh() }, 700)
         }
         scanButton.setOnClickListener { startScan() }
-        findViewById<TextView>(R.id.settingsButton).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
 
         Pairing.listener = { code, client ->
             runOnUiThread {
@@ -192,7 +206,92 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // MARK: - Sekmeler ve Kumanda
+
+    private fun setupTabs() {
+        pageHome = findViewById(R.id.pageHome)
+        pageControl = findViewById(R.id.pageControl)
+        trackpad = findViewById(R.id.trackpad)
+        controlStatus = findViewById(R.id.controlStatus)
+        keyInput = findViewById(R.id.keyInput)
+
+        // Girdiler ZATEN ACIK denetim kanalindan gidiyor: yeni soket
+        // acmak yeni TLS el sikismasi ve yeni yetkilendirme demekti.
+        trackpad.onEvent = { AndrOSService.sendInput(it) }
+
+        findViewById<Button>(R.id.leftClick).setOnClickListener { trackpad.click(false) }
+        findViewById<Button>(R.id.rightClick).setOnClickListener { trackpad.click(true) }
+        findViewById<Button>(R.id.keyboardButton).setOnClickListener { toggleKeyboard() }
+
+        // Yazilan her harf ANINDA Mac'e gidiyor; kutu birikmiyor.
+        // "Gonder" dugmesi beklemek yaziyi gecikmeli hissettiriyordu.
+        keyInput.addTextChangedListener(object : android.text.TextWatcher {
+            var last = ""
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val now = s?.toString() ?: ""
+                when {
+                    now.length > last.length && now.startsWith(last) ->
+                        trackpad.text(now.substring(last.length))
+                    now.length < last.length ->
+                        repeat(last.length - now.length) { trackpad.key("backspace") }
+                    now != last -> { // toptan degisti: bastan yaz
+                        repeat(last.length) { trackpad.key("backspace") }
+                        if (now.isNotEmpty()) trackpad.text(now)
+                    }
+                }
+                last = now
+                // Kutu buyumesin: uzun metinde imlec kaymasi olurdu.
+                if (now.length > 200) { keyInput.setText(""); last = "" }
+            }
+            override fun beforeTextChanged(c: CharSequence?, a: Int, b: Int, d: Int) {}
+            override fun onTextChanged(c: CharSequence?, a: Int, b: Int, d: Int) {}
+        })
+        keyInput.setOnEditorActionListener { _, _, _ -> trackpad.key("enter"); true }
+
+        tabs[0].setOnClickListener { showTab(0) }
+        tabs[1].setOnClickListener { showTab(1) }
+        tabs[2].setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        showTab(0)
+    }
+
+    private fun showTab(i: Int) {
+        pageHome.visibility = if (i == 0) android.view.View.VISIBLE else android.view.View.GONE
+        pageControl.visibility = if (i == 1) android.view.View.VISIBLE else android.view.View.GONE
+        for ((k, t) in tabs.withIndex()) {
+            val active = k == i
+            val color = getColor(if (active) R.color.accent else R.color.text_dim)
+            (t.getChildAt(0) as ImageView).setColorFilter(color)
+            (t.getChildAt(1) as TextView).setTextColor(color)
+        }
+        if (i == 1) refreshControlStatus() else hideKeyboard()
+    }
+
+    private fun refreshControlStatus() {
+        val ok = AndrOSService.hasClient
+        controlStatus.setText(if (ok) R.string.control_ready else R.string.control_offline)
+        controlStatus.setTextColor(getColor(if (ok) R.color.accent else R.color.text_dim))
+        trackpad.alpha = if (ok) 1f else 0.45f
+    }
+
+    private fun toggleKeyboard() {
+        if (keyInput.visibility == android.view.View.VISIBLE) { hideKeyboard(); return }
+        keyInput.visibility = android.view.View.VISIBLE
+        keyInput.requestFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE)
+            as android.view.inputmethod.InputMethodManager
+        imm.showSoftInput(keyInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun hideKeyboard() {
+        if (!this::keyInput.isInitialized) return
+        keyInput.visibility = android.view.View.GONE
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE)
+            as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(keyInput.windowToken, 0)
+    }
+
     private fun refresh() {
+        if (this::controlStatus.isInitialized) refreshControlStatus()
         val on = AndrOSService.running
         statusPill.text = if (on) "Açık" else "Kapalı"
         statusPill.setTextColor(getColor(if (on) R.color.accent else R.color.text_dim))
@@ -250,16 +349,22 @@ class MainActivity : AppCompatActivity() {
                 ActivityCompat.requestPermissions(this, arrayOf(perm), 1)
             }
         }
-        // Telefonun kendi sesini Mac'e ver: bildirim/muzik sesi Mac'in
-        // kulakligindan da duyulsun ("iki cihaz bagliymis gibi").
-        // Android bunu yalnizca ekran yakalama izniyle veriyor; EKRAN
-        // PAYLASILMIYOR, yalnizca ses. Gorusme sesi hicbir kosulda
+        // Ekran yakalama izni IKI ise birden yariyor: ekran yansitma ve
+        // telefonun kendi sesini Mac'e verme ("iki cihaz bagliymis gibi").
+        // Bu yuzden tek satir, tek onay. Gorusme sesi hicbir kosulda
         // yakalanamiyor — bu Android'in kurali, bizim eksigimiz degil.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            row("Telefon sesini Mac’e ver", AndrOSService.capturingAudio) {
+            row("Ekranı ve sesi Mac’e ver", AndrOSService.capturingAudio) {
                 val mgr = getSystemService(android.media.projection.MediaProjectionManager::class.java)
                 projectionRequest.launch(mgr.createScreenCaptureIntent())
             }
+        }
+        // Mac'ten telefona DOKUNMAK icin erisilebilirlik sart. Bu, adb
+        // olmadan baska bir uygulamaya dokunmanin tek desteklenen yolu:
+        // scrcpy bunu `InputManager` ile yapiyor ve oraya yalniz shell
+        // (adb) erisebiliyor.
+        row("Mac’ten telefonu kontrol et", InputService.isEnabled) {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
         // Pil eniyilestirmesi: bu acikken sistem hizmeti arka planda
         // olduruyor ve Mac baglantisi kopuyor.

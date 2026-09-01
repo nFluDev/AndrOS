@@ -18,6 +18,7 @@ import dev.naer.andros.net.Keepalive
 import dev.naer.andros.net.UdpBeacon
 import dev.naer.andros.net.AudioLink
 import dev.naer.andros.net.CameraLink
+import dev.naer.andros.net.ScreenLink
 import org.json.JSONObject
 
 /**
@@ -38,11 +39,13 @@ class AndrOSService : Service() {
     private var keepalive: Keepalive? = null
     private var audio: AudioLink? = null
     private var camera: CameraLink? = null
+    private var screen: ScreenLink? = null
     private var beacon: UdpBeacon? = null
     private var tlsPort = 0
 
     override fun onCreate() {
         super.onCreate()
+        live = this
         identity = Identity(this)
         identity.publishId()
         discovery = Discovery(this)
@@ -74,6 +77,10 @@ class AndrOSService : Service() {
         val cl = CameraLink(this, identity)
         cl.start()
         camera = cl
+        // Ekran yansitma: adb'siz yol (MediaProjection + erisilebilirlik).
+        val sl = ScreenLink(this, identity)
+        sl.start()
+        screen = sl
 
         // mDNS'e ALTERNATIF bulma yolu. Wi-Fi yongasi guc tasarrufunda
         // multicast'i suzdugu (ve bazi yonlendiriciler hic gecirmedigi)
@@ -128,7 +135,11 @@ class AndrOSService : Service() {
                 if (data != null) {
                     val mgr = getSystemService(android.media.projection.MediaProjectionManager::class.java)
                     runCatching {
-                        audio?.setProjection(mgr.getMediaProjection(code, data))
+                        // AYNI izin hem sesi hem ekrani besliyor:
+                        // kullanici tek onay veriyor.
+                        val p = mgr.getMediaProjection(code, data)
+                        audio?.setProjection(p)
+                        screen?.setProjection(p)
                         capturingAudio = true
                     }.onFailure { android.util.Log.w("AndrOS", "yakalama: ${it.message}") }
                 }
@@ -147,10 +158,12 @@ class AndrOSService : Service() {
         beacon?.stop()
         audio?.stop()
         camera?.stop()
+        screen?.stop()
         server?.stop()
         media.stop()
         keepalive?.stop()
         running = false
+        live = null
         super.onDestroy()
     }
 
@@ -228,6 +241,21 @@ class AndrOSService : Service() {
         const val EXTRA_DATA = "data"
         /// Telefon sesi su an Mac'e akiyor mu (arayuz icin).
         @Volatile var capturingAudio = false
+
+        /// Calisan hizmet — Kumanda ekrani girdi olaylarini buradan
+        /// yolluyor. Yeni bir soket acmak yerine ZATEN acik olan denetim
+        /// kanalini kullaniyoruz: baglanti, TLS ve yetkilendirme hazir.
+        @Volatile private var live: AndrOSService? = null
+
+        /// Mac'e tek bir girdi olayi. Bagli istemci yoksa sessizce duser.
+        fun sendInput(o: JSONObject): Boolean {
+            val srv = live?.server ?: return false
+            srv.broadcast(Reply.event("remote.input", o))
+            return true
+        }
+
+        /// Mac'e bagli miyiz (Kumanda ekraninin durum yazisi icin).
+        val hasClient: Boolean get() = (live?.clientCount ?: 0) > 0
         private const val CHANNEL = "andros.connection"
         private const val CHANNEL_QUIET = "andros.connection.quiet"
         private const val NOTIF_ID = 1

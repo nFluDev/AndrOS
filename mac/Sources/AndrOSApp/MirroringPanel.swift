@@ -250,30 +250,20 @@ final class MirroringPanel: NSViewController, AndrOSPanel,
         }
         startButton.isEnabled = !list.isEmpty && !mirroring
         // NEDEN BOS oldugunu ACIKCA soyle.
-        //
-        // Yansitma scrcpy sunucusuyla calisiyor ve o sunucuyu cihazda
-        // baslatmanin tek yolu adb. Uygulama eslesmis olsa bile bu
-        // listede gorunmuyor — kullanici "her sey calisiyor ama burada
-        // telefon yok" diye sasiriyordu.
-        let pairedButNoADB = list.isEmpty && CompanionStore().paired().isEmpty == false
         note.stringValue = list.isEmpty
-            ? (pairedButNoADB
-               ? L("Telefon eşleşmiş ve bağlı — ama yansıtma için USB hata ayıklama "
-                 + "gerekiyor.\nGörüntü akışı scrcpy sunucusuyla çalışıyor ve onu "
-                 + "cihazda başlatmanın adb dışında bir yolu yok. Diğer her şey "
-                 + "(dosyalar, galeri, müzik, bildirimler, kamera, ses) adb olmadan "
-                 + "çalışır.",
-                   "The phone is paired and connected — but mirroring needs USB "
-                 + "debugging.\nThe video stream runs through the scrcpy server, and "
-                 + "there is no way to start it on the device without adb. Everything "
-                 + "else (files, gallery, music, notifications, camera, audio) works "
-                 + "without adb.")
-               : L("Cihaz yok. Telefonu USB ile bağla ve USB hata ayıklamayı aç.",
-                   "No device. Attach the phone over USB and turn on USB debugging."))
-            : L("Yansıtma adb üzerinden çalışıyor; diğer özellikler AndrOS "
-              + "uygulamasıyla, adb olmadan.",
-                "Mirroring runs over adb; the other features work through the "
-              + "AndrOS app without it.")
+            ? L("Cihaz yok. Telefondaki AndrOS uygulamasını aç ve eşleştir "
+              + "(ya da USB ile bağlanıp hata ayıklamayı aç).",
+                "No device. Open the AndrOS app on the phone and pair it "
+              + "(or attach over USB with debugging on).")
+            : (list.contains { $0.viaApp }
+               ? L("“Uygulama” yazan cihaz hata ayıklama İSTEMEZ: görüntü telefonun "
+                 + "ekran kaydı izninden gelir, dokunma da erişilebilirlik "
+                 + "hizmetinden. İkisini de telefondaki uygulamadan aç.",
+                   "A device marked “App” needs NO debugging: the picture comes from "
+                 + "the phone's screen-capture permission and touch from its "
+                 + "accessibility service. Enable both in the app on the phone.")
+               : L("USB/Wi-Fi ile bağlı cihazda yansıtma adb üzerinden çalışır.",
+                   "On a USB/Wi-Fi device mirroring runs over adb."))
     }
 
     /// Yansitma ayri pencerede acildigi icin panel yalnizca DURUMU gosterir.

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Girdi hizmeti: baska uygulamalara dokunabilmek icin
+     `canPerformGestures` sart. Ekran icerigini OKUMUYORUZ
+     (`accessibilityEventTypes` bos): yalnizca dokunma gonderiyoruz ve
+     odaklanmis metin alanini buluyoruz. -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewFocused"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/input_service_desc"
+    android:notificationTimeout="100" />
